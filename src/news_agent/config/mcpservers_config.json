@@ -1,0 +1,17 @@
+{
+  "mcp": {
+    "servers": {
+      "firecrawl": {
+        "command": "npx",
+        "args": ["-y", "firecrawl-mcp"],
+        "env": {
+          "FIRECRAWL_API_KEY": "**"
+        }
+      },
+      "localsearch": {
+      "command": "python",
+        "args": ["src/news_agent/agents/ingestion/local_search_mcp_server.py"]
+      }
+    }
+  }
+}
