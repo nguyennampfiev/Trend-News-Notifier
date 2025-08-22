@@ -5,12 +5,12 @@
         "command": "npx",
         "args": ["-y", "firecrawl-mcp"],
         "env": {
-          "FIRECRAWL_API_KEY": "**"
+          "FIRECRAWL_API_KEY": "fc-2ff859a84ff14092947444ec6149e5b3"
         }
       },
-      "localsearch": {
-      "command": "python",
-        "args": ["src/news_agent/agents/ingestion/local_search_mcp_server.py"]
+      "serpapisearch": {
+        "command": "python",
+        "args": ["src/news_agent/agents/ingestion/serpapi_search_mcp_server.py"]
       }
     }
   }

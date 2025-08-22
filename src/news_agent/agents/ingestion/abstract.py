@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Dict, List
 
 from agents.mcp import MCPServerStdio
 
-from .handlers import BaseMCPHandler, FirecrawlHandler, LocalSearchHandler
+from .handlers import BaseMCPHandler, FirecrawlHandler, SerpAPISearchHandler
+
+# logger = logging.getLogger(__name__)
 
 
 class AbstractIngestion:
@@ -30,15 +33,18 @@ class AbstractIngestion:
         for name, params in servers.items():
             if name == "firecrawl":
                 handler = FirecrawlHandler(name=name, params=params)
-            elif name == "localsearch":
-                handler = LocalSearchHandler(name=name, params=params)
+
+            elif name == "serpapisearch":
+                handler = SerpAPISearchHandler(name=name, params=params)
+
+            # if name == "scraper":
+            #    handler = ScraperHandler(name=name, params=params)
+
             else:
                 raise ValueError(f"Unknown MCP server type: {name}")
 
-        await handler.connect()
-
         handlers_obj.append(handler)
-
+        await asyncio.gather(*(handler.connect() for handler in handlers_obj))
         return cls(handlers=handlers_obj)
 
     def get_mcp_servers(self) -> List[MCPServerStdio]:

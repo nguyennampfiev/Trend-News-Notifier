@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 load_dotenv()
 
 api_key = os.getenv("SERPAPI_KEY")
-mcp = FastMCP("localsearch", port=8001)
+mcp = FastMCP("serpapisearch", port=8001)
 
 
 def search_hot_news(api_key, query, language="en", timeframe="24h", num_results=20):
@@ -212,7 +212,9 @@ def is_breaking_news(title):
     return any(indicator in title_lower for indicator in breaking_indicators)
 
 
-@mcp.tool(name="search_trending_topics", description="Search for trending topics")
+@mcp.tool(
+    name="search_trending_topics", description="Search for trending topics wih serpapi"
+)
 def search_trending_topics(topics="breaking news", language="en"):
     """Search for trending topics
     Args:
@@ -251,7 +253,10 @@ def search_trending_topics(topics="breaking news", language="en"):
     return unique_articles
 
 
-@mcp.tool(name="search_by_categoty_hot_news", description="Search hot news by category")
+@mcp.tool(
+    name="search_by_categoty_hot_news",
+    description="Search hot news by category with serpapi",
+)
 def search_by_category_hot_news(category="politics", language="en"):
     """Search hot news by category
     Args:
@@ -275,20 +280,6 @@ def search_by_category_hot_news(category="politics", language="en"):
 
     query = category_queries.get(category, f"{category} latest news")
     return search_hot_news(api_key, query, language, timeframe="24h")
-
-    # # Search trending topics
-    # hot_articles = search_trending_topics(API_KEY, language="en")
-
-    # print(f"Found {len(hot_articles)} hot news articles")
-
-    # for i, article in enumerate(hot_articles[:10], 1):  # Top 10 hottest
-    #     print(f"\n{i}. 🔥 HOTNESS SCORE: {article['recency_score'] + article['source_authority']}")
-    #     print(f"   {'🚨 BREAKING: ' if article['is_breaking'] else ''}{article['title']}")
-    #     print(f"   📰 Source: {article['source']} (Authority: {article['source_authority']}/5)")
-    #     print(f"   ⏰ Published: {article['published_at']} (Recency: {article['recency_score']}/10)")
-    #     print(f"   🔥 Hot Keywords: {', '.join(article['engagement_keywords']) if article['engagement_keywords'] else 'None'}")
-    #     print(f"   🔗 {article['url']}")
-    #     print(f"   📝 {article['content'][:150]}...")
 
 
 if __name__ == "__main__":

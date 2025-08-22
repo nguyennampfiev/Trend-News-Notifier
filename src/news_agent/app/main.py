@@ -26,5 +26,4 @@ async def ingresion(query: QueryRequest):
     query = query.query  # Extract the query string from the request body
     result = await agent_ingestion.process_query(query)
 
-    print(result)
     return {"result": result}

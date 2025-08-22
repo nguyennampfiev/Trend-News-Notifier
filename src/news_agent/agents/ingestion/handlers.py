@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 from agents.mcp import MCPServerStdio
 
+# logger = logging.getLogger(__name__)
+
 
 class BaseMCPHandler(abc.ABC):
     """
@@ -17,7 +19,6 @@ class BaseMCPHandler(abc.ABC):
         self.server: Optional[MCPServerStdio] = None
         self.connected = False
 
-    @abc.abstractmethod
     async def connect(self) -> None:
         """
         Connect to the MCP server.
@@ -25,9 +26,8 @@ class BaseMCPHandler(abc.ABC):
         self.server = MCPServerStdio(params=self.params, name=self.name)
         await self.server.connect()
         self.connected = True
-        print(f"Connected to MCP server: {self.name}")
+        # logger.info(f"Connected to MCP server: {self.name}")
 
-    @abc.abstractmethod
     def get_mcp_server(self) -> MCPServerStdio:
         """
         Get the MCP server instance.
@@ -42,22 +42,12 @@ class FirecrawlHandler(BaseMCPHandler):
     Handler for Firecrawl MCP server.
     """
 
-    async def connect(self) -> None:
-        await super().connect()
-        # Additional Firecrawl-specific connection logic can go here
-
-    def get_mcp_server(self) -> MCPServerStdio:
-        return super().get_mcp_server()
+    pass
 
 
-class LocalSearchHandler(BaseMCPHandler):
+class SerpAPISearchHandler(BaseMCPHandler):
     """
-    Handler for Bing Search MCP server.
+    Handler for SerpAPISearch MCP server.
     """
 
-    async def connect(self) -> None:
-        await super().connect()
-        # Additional LocalSearch-specific connection logic can go here
-
-    def get_mcp_server(self) -> MCPServerStdio:
-        return super().get_mcp_server()
+    pass
