@@ -1,33 +1,40 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 
+import aiohttp
 import requests
-from dotenv import load_dotenv  # Import the function
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 api_key = os.getenv("SERPAPI_KEY")
 mcp = FastMCP("serpapisearch", port=8001)
 
 
-def search_hot_news(api_key, query, language="en", timeframe="24h", num_results=20):
+@mcp.tool()
+async def search_hot_news(query, language="en", timeframe="1h", num_results=5):
     """
-    Search for hot/trending news using SerpAPI
+    Search for hot/trending news given query using SerpAPI
 
     Args:
         api_key (str): SerpAPI key
         query (str): Search query
         language (str): Language code
         timeframe (str): "1h", "24h", "7d", "1m", "1y" or custom date
-        num_results (int): Number of results
+        num_results (int): Number of results Defaults to 5
 
     Returns:
         List[Dict]: Hot news articles
     """
-
+    logger.info(
+        f"LLM called tool 'search_hot_news' with query='{query}', language='{language}', timeframe='{timeframe}', num_results={num_results}"
+    )
     base_url = "https://serpapi.com/search"
 
     # Time-based parameters for hot news
@@ -53,55 +60,59 @@ def search_hot_news(api_key, query, language="en", timeframe="24h", num_results=
     }
 
     try:
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()
-        data = response.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(base_url, params=params) as response:
+                # response = requests.get(base_url, params=params)
+                # response.raise_for_status()
+                data = await response.json()
+                logger.info(
+                    f"SerpAPI search for '{query}' returned {len(data.get('news_results', []))} results."
+                )
+                # Extract hot news with focus on trending indicators
+                articles = []
+                for item in data.get("news_results", []):
 
-        # Extract hot news with focus on trending indicators
-        articles = []
-        for item in data.get("news_results", []):
+                    # Calculate recency score (newer = hotter)
+                    published_at = item.get("date")
+                    recency_score = calculate_recency_score(published_at)
 
-            # Calculate recency score (newer = hotter)
-            published_at = item.get("date")
-            recency_score = calculate_recency_score(published_at)
+                    article = {
+                        "id": item.get("link"),
+                        "source": item.get("source", ""),
+                        "url": item.get("link"),
+                        "title": item.get("title", ""),
+                        "content": item.get("snippet", ""),
+                        "published_at": published_at,
+                        "language": language,
+                        # HOT NEWS specific fields
+                        "recency_score": recency_score,  # How recent (higher = newer)
+                        "source_authority": get_source_authority(
+                            item.get("source", "")
+                        ),  # Source credibility
+                        "engagement_keywords": extract_hot_keywords(
+                            item.get("title", "") + " " + item.get("snippet", "")
+                        ),
+                        "is_breaking": is_breaking_news(item.get("title", "")),
+                        "search_query": query,  # What query found this
+                        "search_timestamp": datetime.now().isoformat(),  # When we found it
+                    }
 
-            article = {
-                "id": item.get("link"),
-                "source": item.get("source", ""),
-                "url": item.get("link"),
-                "title": item.get("title", ""),
-                "content": item.get("snippet", ""),
-                "published_at": published_at,
-                "language": language,
-                # HOT NEWS specific fields
-                "recency_score": recency_score,  # How recent (higher = newer)
-                "source_authority": get_source_authority(
-                    item.get("source", "")
-                ),  # Source credibility
-                "engagement_keywords": extract_hot_keywords(
-                    item.get("title", "") + " " + item.get("snippet", "")
-                ),
-                "is_breaking": is_breaking_news(item.get("title", "")),
-                "search_query": query,  # What query found this
-                "search_timestamp": datetime.now().isoformat(),  # When we found it
-            }
+                    articles.append(article)
 
-            articles.append(article)
-
-        # Sort by hotness (recency + authority + breaking news)
-        articles.sort(
-            key=lambda x: (
-                x["is_breaking"] * 10
-                + x["recency_score"]  # Breaking news gets priority
-                + x["source_authority"]  # Recent news  # Authoritative sources
-            ),
-            reverse=True,
-        )
+                # Sort by hotness (recency + authority + breaking news)
+                articles.sort(
+                    key=lambda x: (
+                        x["is_breaking"] * 10
+                        + x["recency_score"]  # Breaking news gets priority
+                        + x["source_authority"]  # Recent news  # Authoritative sources
+                    ),
+                    reverse=True,
+                )
 
         return articles
 
     except requests.exceptions.RequestException as e:
-        print(f"Error searching hot news: {e}")
+        logger.info(f"Error searching hot news: {e}")
         return []
 
 
@@ -210,76 +221,6 @@ def is_breaking_news(title):
     breaking_indicators = ["breaking", "urgent", "just in", "developing", "alert"]
     title_lower = title.lower()
     return any(indicator in title_lower for indicator in breaking_indicators)
-
-
-@mcp.tool(
-    name="search_trending_topics", description="Search for trending topics wih serpapi"
-)
-def search_trending_topics(topics="breaking news", language="en"):
-    """Search for trending topics
-    Args:
-        api_key (str): Your SerpAPI key
-        topic (str): Specific topic to search for, or None for general trending
-        language (str): Language code (default: "en")
-
-    Returns:
-        List[Dict]: Trending news articles
-    """
-
-    if topics is None:
-        topics = [
-            "breaking news",
-            "trending now",
-            "latest news",
-            "developing story",
-            "just happened",
-        ]
-
-    all_hot_articles = []
-    for topic in topics:
-        articles = search_hot_news(
-            api_key, topic, language, timeframe="24h", num_results=10
-        )
-        all_hot_articles.extend(articles)
-
-    # Remove duplicates by URL
-    seen_urls = set()
-    unique_articles = []
-    for article in all_hot_articles:
-        if article["url"] not in seen_urls:
-            seen_urls.add(article["url"])
-            unique_articles.append(article)
-
-    return unique_articles
-
-
-@mcp.tool(
-    name="search_by_categoty_hot_news",
-    description="Search hot news by category with serpapi",
-)
-def search_by_category_hot_news(category="politics", language="en"):
-    """Search hot news by category
-    Args:
-        category (str): Category to search for (e.g., "politics", "technology")
-        language (str): Language code (default: "en")
-
-    Returns:
-        List[Dict]: Hot news articles in the specified category
-    """
-
-    category_queries = {
-        "politics": "politics breaking news latest",
-        "technology": "tech news latest breakthrough",
-        "business": "business news market latest",
-        "sports": "sports news latest scores",
-        "entertainment": "entertainment news celebrity latest",
-        "health": "health news medical breakthrough",
-        "science": "science news discovery latest",
-        "world": "world news international breaking",
-    }
-
-    query = category_queries.get(category, f"{category} latest news")
-    return search_hot_news(api_key, query, language, timeframe="24h")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ async def health():
 @app.post("/ingresion")
 async def ingresion(query: QueryRequest):
     agent_ingestion = IngestionAgent(
-        config_path="src/news_agent/config/mcpservers_config.json",
+        config_path="src/news_agent/config/ingest_mcp_config.json",
         session_id=SQLiteSession("123"),
     )
     query = query.query  # Extract the query string from the request body
