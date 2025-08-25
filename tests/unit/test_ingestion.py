@@ -9,7 +9,8 @@ from news_agent.agents.ingestion.ingestion import IngestionAgent
 
 @pytest.mark.asyncio
 @patch("agents.Runner.run", new_callable=AsyncMock)
-async def test_query_mocked_by_ingestion_agent(mock_run):
+@patch("agents.ingestion.AbstractIngestion.from_config", new_callable=AsyncMock)
+async def test_query_mocked_by_ingestion_agent(mock_from_config, mock_run):
     class MockRunResult:
         final_output = [
             {
@@ -19,7 +20,19 @@ async def test_query_mocked_by_ingestion_agent(mock_run):
             }
         ]
 
-    mock_run.return_value = MockRunResult()
+    class MockIngestion:
+        async def process_query(self, query):
+            return {
+                "results": [
+                    {
+                        "topic": "Test News",
+                        "summary": "This is a test summary.",
+                        "link": "https://example.com/test",
+                    }
+                ]
+            }
+
+    mock_from_config.return_value = MockIngestion()
 
     agent = IngestionAgent(
         config_path="src/news_agent/config/ingest_mcp_config.json",
