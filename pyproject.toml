@@ -18,6 +18,7 @@ duckduckgo-search = "^8.1.1"
 ddgs = "^9.5.4"
 pre-commit = "^4.3.0"
 openai-agents = "^0.2.9"
+aiosmtplib = "^4.0.2"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.3.0"

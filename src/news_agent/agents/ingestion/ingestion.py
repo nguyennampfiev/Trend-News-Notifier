@@ -5,8 +5,8 @@ from typing import Any, Dict, Optional
 
 from agents import Runner, SQLiteSession
 
-from news_agent.agents.base_agent import init_agent
-from news_agent.agents.schema import NewsOutput
+from src.news_agent.agents.base_agent import init_agent
+from src.news_agent.agents.schema import NewsOutput
 
 from .abstract import AbstractIngestion
 
