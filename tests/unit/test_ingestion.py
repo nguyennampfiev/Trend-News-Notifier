@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
 from agents import SQLiteSession
@@ -9,35 +9,44 @@ from news_agent.agents.ingestion.ingestion import IngestionAgent
 
 @pytest.mark.asyncio
 @patch("agents.Runner.run", new_callable=AsyncMock)
-@patch("agents.ingestion.AbstractIngestion.from_config", new_callable=AsyncMock)
+@patch(
+    "news_agent.agents.ingestion.ingestion.AbstractIngestion.from_config",
+    new_callable=AsyncMock,
+)
 async def test_query_mocked_by_ingestion_agent(mock_from_config, mock_run):
-    class MockRunResult:
-        final_output = [
-            {
-                "topic": "Test News",
-                "summary": "This is a test summary.",
-                "link": "https://example.com/test",
-            }
-        ]
 
-    class MockIngestion:
-        async def process_query(self, query):
-            return {
-                "results": [
-                    {
-                        "topic": "Test News",
-                        "summary": "This is a test summary.",
-                        "link": "https://example.com/test",
-                    }
-                ]
-            }
+    # Autospec for ingestion
+    mock_ingestion = create_autospec(AbstractIngestion, instance=True)
+    mock_ingestion.process_query = AsyncMock(
+        return_value={
+            "results": [
+                {
+                    "topic": "Test News",
+                    "summary": "This is a test summary.",
+                    "link": "https://example.com/test",
+                }
+            ]
+        }
+    )
+    mock_ingestion.get_mcp_servers.return_value = []
 
-    mock_from_config.return_value = MockIngestion()
+    mock_from_config.return_value = mock_ingestion
+
+    # Fix Runner.run to return real data
+    mock_run.return_value = AsyncMock()
+    mock_run.return_value.final_output = [
+        {
+            "topic": "Test News",
+            "summary": "This is a test summary.",
+            "link": "https://example.com/test",
+        }
+    ]
 
     agent = IngestionAgent(
         config_path="src/news_agent/config/ingest_mcp_config.json",
         session_id=SQLiteSession("123"),
     )
+
     result = await agent.process_query("test query")
 
     assert result["results"][0]["topic"] == "Test News"
