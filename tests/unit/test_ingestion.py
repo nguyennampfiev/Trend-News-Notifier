@@ -8,17 +8,18 @@ from news_agent.agents.ingestion.ingestion import IngestionAgent
 
 
 @pytest.mark.asyncio
-@patch("agents.Runner.run")
+@patch("agents.Runner.run", new_callable=AsyncMock)
 async def test_query_mocked_by_ingestion_agent(mock_run):
-    mock_run.return_value = AsyncMock(
-        final_output=[
+    class MockRunResult:
+        final_output = [
             {
                 "topic": "Test News",
                 "summary": "This is a test summary.",
                 "link": "https://example.com/test",
             }
         ]
-    )
+
+    mock_run.return_value = MockRunResult()
 
     agent = IngestionAgent(
         config_path="src/news_agent/config/ingest_mcp_config.json",
