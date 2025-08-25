@@ -3,43 +3,45 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from agents import (Agent, GuardrailFunctionOutput, OpenAIResponsesModel,
-                    RunContextWrapper, Runner, SQLiteSession, output_guardrail)
-from openai import AsyncOpenAI
+from agents import Runner, SQLiteSession
 
-from src.news_agent.agents.base_agent import init_agent
-from src.news_agent.agents.schema import MessageOutput, NewsOutput
+from news_agent.agents.base_agent import init_agent
+from news_agent.agents.schema import NewsOutput
 
 from .abstract import AbstractIngestion
+
+# from agents import (Agent, GuardrailFunctionOutput, OpenAIResponsesModel,
+#                     RunContextWrapper, Runner, SQLiteSession, output_guardrail)
+# from openai import AsyncOpenAI
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-guardrail_agent = Agent(
-    name="GuardrailAgent",
-    model=OpenAIResponsesModel(
-        model="openai/gpt-oss-20b",
-        openai_client=AsyncOpenAI(
-            base_url="http://0.0.0.0:8000/v1",
-            api_key="not-needed",
-        ),
-    ),
-    instructions="An agent that ensures output adheres to a specified format.",
-    output_type=NewsOutput,
-)
+# guardrail_agent = Agent(
+#     name="GuardrailAgent",
+#     model=OpenAIResponsesModel(
+#         model="openai/gpt-oss-20b",
+#         openai_client=AsyncOpenAI(
+#             base_url="http://0.0.0.0:8000/v1",
+#             api_key="not-needed",
+#         ),
+#     ),
+#     instructions="An agent that ensures output adheres to a specified format.",
+#     output_type=NewsOutput,
+# )
 
 
-@output_guardrail
-async def check_ouputformat_with_guardrail(
-    ctx: RunContextWrapper, agent: Agent, output: MessageOutput
-) -> GuardrailFunctionOutput:
-    result = await Runner.run(guardrail_agent, output.response, context=ctx.context)
-    logger.info(f"Guardrail output: {result.final_output}")
-    return GuardrailFunctionOutput(
-        output_info=result.final_output,
-        tripwire_triggered=result.final_output.link,
-    )
+# @output_guardrail
+# async def check_ouputformat_with_guardrail(
+#     ctx: RunContextWrapper, agent: Agent, output: MessageOutput
+# ) -> GuardrailFunctionOutput:
+#     result = await Runner.run(guardrail_agent, output.response, context=ctx.context)
+#     logger.info(f"Guardrail output: {result.final_output}")
+#     return GuardrailFunctionOutput(
+#         output_info=result.final_output,
+#         tripwire_triggered=result.final_output.link,
+#     )
 
 
 class IngestionAgent:
