@@ -93,7 +93,7 @@ class PlannerAgent:
         # Save to DB
         try:
             # Parse structured output
-            for news_item in results:
+            for news_item in results.news:
                 if news_item is None:
                     continue  # skip empty
 
@@ -102,7 +102,7 @@ class PlannerAgent:
                 link = getattr(news_item, "link", "").strip()
                 logger.info(f"Saving trend: topic='{topic}', link='{link}'")
                 self.db.save_trend(
-                    topic=topic, summary=summary, link=link, source="IngestionAgent"
+                    topic=topic, summary=summary, url=link, source="IngestionAgent"
                 )
         except Exception as e:
             logger.error(f"Error saving to DB: {e}")

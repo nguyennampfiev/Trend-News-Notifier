@@ -20,8 +20,9 @@ class EmailSenderAgent(AbstractSender):
         self.smtp_pass = smtp_pass
         # Clean recipients
         self.recipients = [r.strip("[]").strip() for r in recipients]
+        self.configure()
 
-    async def configure(self, settings) -> None:
+    def configure(self, settings: dict | None = None) -> None:
         self.smtp_config = {
             "host": "smtp.gmail.com",
             "port": 587,

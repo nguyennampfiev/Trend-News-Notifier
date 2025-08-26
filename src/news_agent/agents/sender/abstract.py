@@ -21,7 +21,7 @@ class AbstractSender(ABC):
         pass
 
     @abstractmethod
-    async def configure(self, settings: dict) -> None:
+    async def configure(self, settings: dict | None = None) -> None:
         """
         Configure the sender with necessary settings.
 
