@@ -1,4 +1,5 @@
 {
   "ingest_mcp_config": "src/news_agent/config/ingest_mcp_config.json",
-  "sender_mcp_config": "src/news_agent/config/senders_config.json"
+  "sender_mcp_config": "src/news_agent/config/senders_config.json",
+  "planner_mcp_config": "src/news_agent/config/planner_config.json"
 }

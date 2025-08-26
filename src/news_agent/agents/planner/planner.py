@@ -62,9 +62,19 @@ class PlannerAgent:
         """Load config from file and initialize agents."""
         with open(self.config_path, "r") as f:
             self.config = json.load(f)
-        self.ingestion_agent = IngestionAgent(
-            self.config.get("ingest_mcp_config", ""), self.session_id
+        # Load config parameters
+        ingest_config_path = self.config.get(
+            "ingest_mcp_config", "src/news_agent/config/ingest_mcp_config.json"
         )
+        self.email_send_interval = self.config.get("email_send_interval_minutes", 60)
+        self.crawl_interval = self.config.get("crawl_interval_minutes", 30)
+        self.process_retry_delay = self.config.get("process_retry_delay_seconds", 30)
+        self.max_ingestion_retries = self.config.get("max_ingestion_retries", 5)
+        self.ingestion_failure_delay = self.config.get(
+            "ingestion_failure_delay_minutes", 15
+        )
+
+        self.ingestion_agent = IngestionAgent(ingest_config_path, self.session_id)
         self.sender_agent = EmailSenderAgent(
             self.db, smtp_user, smtp_pass, RECIPIENT_EMAILS
         )
@@ -74,41 +84,45 @@ class PlannerAgent:
         if not self.ingestion_agent or not self.sender_agent:
             raise RuntimeError("Agents not initialized. Call load_config() first.")
 
-        #  Call IngestionAgent
-        try:
-            ingestion_result = await self.ingestion_agent.process_query(query)
-        except Exception as e:
-            logger.error(f"IngestionAgent failed: {e}")
-            delay = (
-                self.config.get("time_schedule_ingestion", 30) if self.config else 30
-            )
-            await asyncio.sleep(delay)
-            return await self.process_query(query)
+        # Call IngestionAgent with retry logic based on config
+        retries = 0
+        while retries < self.max_ingestion_retries:
+            try:
+                ingestion_result = await self.ingestion_agent.process_query(query)
+                break
+            except Exception as e:
+                logger.error(f"IngestionAgent failed (attempt {retries+1}): {e}")
+                await asyncio.sleep(self.process_retry_delay)
+                retries += 1
+        else:
+            logger.error("Max ingestion retries reached. Delaying before next attempt.")
+            await asyncio.sleep(self.ingestion_failure_delay * 60)
+            return {"results": "No results found due to repeated ingestion failures."}
 
         results = ingestion_result.get("results")
         if not results or results == "No results found.":
             logger.info("No results returned from ingestion. Pipeline stopped.")
-            return {"results": "No results found."}
+            results = []
 
-        # Save to DB
-        try:
-            # Parse structured output
-            for news_item in results.news:
-                if news_item is None:
-                    continue  # skip empty
+        if results:
+            # Save to DB
+            try:
+                for news_item in results.news:
+                    if news_item is None:
+                        continue  # skip empty
 
-                topic = getattr(news_item, "topic", "").strip()
-                summary = getattr(news_item, "summary", "").strip()
-                link = getattr(news_item, "link", "").strip()
-                logger.info(f"Saving trend: topic='{topic}', link='{link}'")
-                self.db.save_trend(
-                    topic=topic, summary=summary, url=link, source="IngestionAgent"
-                )
-        except Exception as e:
-            logger.error(f"Error saving to DB: {e}")
-            return {"error": "Failed to save trend to database."}
+                    topic = getattr(news_item, "topic", "").strip()
+                    summary = getattr(news_item, "summary", "").strip()
+                    link = getattr(news_item, "link", "").strip()
+                    logger.info(f"Saving trend: topic='{topic}', link='{link}'")
+                    self.db.save_trend(
+                        topic=topic, summary=summary, url=link, source="IngestionAgent"
+                    )
+            except Exception as e:
+                logger.error(f"Error saving to DB: {e}")
+                return {"error": "Failed to save trend to database."}
 
-        # 3 Call SenderAgent to send unsent items
+        # Call SenderAgent to send unsent items
         try:
             sender_result = await self.sender_agent.send_unsent()
             logger.info("SenderAgent completed sending unsent trends.")
