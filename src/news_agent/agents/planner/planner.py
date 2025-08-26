@@ -9,11 +9,11 @@ from typing import Any, Dict, Optional
 from agents import SQLiteSession
 from dotenv import load_dotenv
 
-from src.news_agent.agents.db.db import AbstractTrendDB
-from src.news_agent.agents.db.sql_db import SQLiteTrendDB
-from src.news_agent.agents.ingestion.ingestion import IngestionAgent
-from src.news_agent.agents.sender.abstract import AbstractSender
-from src.news_agent.agents.sender.email_sender import EmailSenderAgent
+from news_agent.agents.db.db import AbstractTrendDB
+from news_agent.agents.db.sql_db import SQLiteTrendDB
+from news_agent.agents.ingestion.ingestion import IngestionAgent
+from news_agent.agents.sender.abstract import AbstractSender
+from news_agent.agents.sender.email_sender import EmailSenderAgent
 
 load_dotenv()  # Load environment variables from .env file
 

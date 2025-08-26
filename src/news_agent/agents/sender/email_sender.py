@@ -4,8 +4,8 @@ from typing import Dict, List
 
 import aiosmtplib
 
-from src.news_agent.agents.db.db import AbstractTrendDB
-from src.news_agent.agents.sender.abstract import AbstractSender
+from news_agent.agents.db.db import AbstractTrendDB
+from news_agent.agents.sender.abstract import AbstractSender
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

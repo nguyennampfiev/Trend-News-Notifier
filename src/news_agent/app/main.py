@@ -2,7 +2,7 @@ from agents import SQLiteSession
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from src.news_agent.agents.planner.planner import PlannerAgent
+from news_agent.agents.planner.planner import PlannerAgent
 
 
 class QueryRequest(BaseModel):
