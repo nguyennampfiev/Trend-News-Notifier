@@ -15,3 +15,7 @@ class NewsItem(BaseModel):
 
 class NewsOutput(BaseModel):
     news: List[NewsItem]
+
+
+class CheckExistence(BaseModel):
+    exists: bool

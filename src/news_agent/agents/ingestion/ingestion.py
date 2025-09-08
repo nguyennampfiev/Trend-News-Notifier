@@ -48,7 +48,7 @@ class IngestionAgent:
     DEFAULT_PROMPT = """
     You are a news assistant.
     Given a trending topic or keyword, search the web using SerpApi or Firecrawl and produce a concise summary of the latest news.
-
+    - If news is duplicated, skip it.
     - The summary must be **2-3 sentences**.
     - Include the **most relevant link** for the topic.
     - Focus on **main points only**; ignore fluff, filler, or background context unless essential.

@@ -19,7 +19,7 @@ class EmailSenderAgent(AbstractSender):
         self.smtp_user = smtp_user
         self.smtp_pass = smtp_pass
         # Clean recipients
-        self.recipients = [r.strip("[]").strip() for r in recipients]
+        self.recipients = recipients
         self.configure()
 
     def configure(self, settings: dict | None = None) -> None:
@@ -34,7 +34,7 @@ class EmailSenderAgent(AbstractSender):
     async def send(self, to_address: str, trend: Dict) -> bool:
         message = EmailMessage()
         message["From"] = self.smtp_config["from_address"]
-        message["To"] = to_address.strip("[]").strip()  # Clean address
+        message["To"] = to_address
         message["Subject"] = f"New Trend: {trend['topic']}"
         message.set_content(f"{trend['summary']}\n\nRead more: {trend['url']}")
 
@@ -61,7 +61,7 @@ class EmailSenderAgent(AbstractSender):
         sent_count = 0
         failed_count = 0
 
-        for trend in unsent:
+        for trend in unsent[-1]:
             logger.info(f"Processing trend: {trend['topic']}")
             trend_sent_successfully = False
 

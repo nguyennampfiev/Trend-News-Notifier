@@ -1,7 +1,7 @@
 {
     "email_send_interval_minutes": 60,
-    "crawl_interval_minutes": 30,
+    "crawl_interval_minutes": 3,
     "process_retry_delay_seconds": 30,
     "max_ingestion_retries": 5,
-    "ingestion_failure_delay_minutes": 15
+    "ingestion_failure_delay_minutes": 3
 }

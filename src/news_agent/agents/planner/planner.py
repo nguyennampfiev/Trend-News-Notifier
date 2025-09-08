@@ -14,6 +14,7 @@ from news_agent.agents.db.sql_db import SQLiteTrendDB
 from news_agent.agents.ingestion.ingestion import IngestionAgent
 from news_agent.agents.sender.abstract import AbstractSender
 from news_agent.agents.sender.email_sender import EmailSenderAgent
+from news_agent.agents.validator.deduplication_agent import DeduplicationAgent
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -62,6 +63,7 @@ class PlannerAgent:
         """Load config from file and initialize agents."""
         with open(self.config_path, "r") as f:
             self.config = json.load(f)
+
         # Load config parameters
         ingest_config_path = self.config.get(
             "ingest_mcp_config", "src/news_agent/config/ingest_mcp_config.json"
@@ -78,6 +80,7 @@ class PlannerAgent:
         self.sender_agent = EmailSenderAgent(
             self.db, smtp_user, smtp_pass, RECIPIENT_EMAILS
         )
+        self.deduplication_agent = DeduplicationAgent(self.db, self.session_id)
 
     async def process_query(self, query: str) -> Dict[str, Any]:
         """Orchestrate ingestion → save → sender workflow."""
@@ -114,10 +117,23 @@ class PlannerAgent:
                     topic = getattr(news_item, "topic", "").strip()
                     summary = getattr(news_item, "summary", "").strip()
                     link = getattr(news_item, "link", "").strip()
-                    logger.info(f"Saving trend: topic='{topic}', link='{link}'")
-                    self.db.save_trend(
-                        topic=topic, summary=summary, url=link, source="IngestionAgent"
+                    check_duplicate = await self.deduplication_agent.is_duplicate(
+                        topic, summary, link
                     )
+
+                    if check_duplicate:  # Skip duplicates
+                        logger.info(
+                            f"Duplicate found, skipping: topic='{topic}', link='{link}'"
+                        )
+                        continue
+                    else:
+                        logger.info(f"Saving trend: topic='{topic}', link='{link}'")
+                        self.db.save_trend(
+                            topic=topic,
+                            summary=summary,
+                            url=link,
+                            source="IngestionAgent",
+                        )
             except Exception as e:
                 logger.error(f"Error saving to DB: {e}")
                 return {"error": "Failed to save trend to database."}

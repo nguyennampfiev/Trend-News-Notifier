@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 
 def init_agent(
     instructions: str,
-    mcp_servers: List[MCPServerStdio],
+    mcp_servers: List[MCPServerStdio] | None = None,
     tool: List = [],
     name: str = "Assistant",
     output_guardrails: List = None,
@@ -18,6 +18,9 @@ def init_agent(
     """
     Initialize the agent with custom instructions and connected MCP servers.
     """
+    if mcp_servers is None:
+        mcp_servers = []
+
     if tool is None:
         return Agent(
             name=name,

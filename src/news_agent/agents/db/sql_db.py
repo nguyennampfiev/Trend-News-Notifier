@@ -57,3 +57,11 @@ class SQLiteTrendDB(AbstractTrendDB):
                 (trend_id,),
             )
         self.conn.commit()
+
+    def get_all_entries(self) -> List[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT topic, url FROM trends")
+        rows = cursor.fetchall()
+        columns = [column[0] for column in cursor.description]
+        self.conn.commit()
+        return [dict(zip(columns, row)) for row in rows]
