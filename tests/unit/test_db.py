@@ -1,6 +1,6 @@
 import pytest
 
-from news_agent.agents.db.sql_db import SQLiteTrendDB
+from news_agent.agents.db.trend import SQLiteTrendDB
 
 
 @pytest.fixture
