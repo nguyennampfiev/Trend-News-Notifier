@@ -5,6 +5,7 @@ from agents import SQLiteSession
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from news_agent.agents.db.subscriptions import SQLiteSubcriptionDB
 from news_agent.agents.planner.planner import PlannerAgent
 
 
@@ -12,12 +13,27 @@ class QueryRequest(BaseModel):
     query: str
 
 
+class SubscriptionRequest(BaseModel):
+    email: str
+    topics: list[str]
+
+
 app = FastAPI(title="News Agent Notifier")
+db = SQLiteSubcriptionDB("subscriptions.db")
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/api/subscribe")
+async def subscribe(req: SubscriptionRequest):
+    print("Received subscription request:", req)
+    for topic in req.topics:
+        db.add_subscription(req.email, [topic])
+        print(f"Subscribed {req.email} to topic: {topic}")
+    return {"status": "subcribe ok", "topics": req.topics}
 
 
 @app.post("/ingresion")
@@ -46,9 +62,20 @@ async def automatic_ingression():
     )
     while True:
         # You can customize the query or fetch from a source
-        query = "latest France news"
-        await planner_agent.process_query(query)
-        await asyncio.sleep(crawl_interval * 60)
+        subscriptions = db.get_all_subscriptions()
+        if subscriptions:
+            for sub in subscriptions:
+                email = sub["email"]
+                topics_str = sub["topics"]  # comma-separated string
+                topics = topics_str.split(",")  # convert back to list
+                for topic in topics:
+                    print(f"Running for topic: {topic}")
+                    try:
+                        await planner_agent.process_query_by_user(topic, email)
+                    except Exception as e:
+                        print(f"Error processing topic : {topic}: {e}")
+
+        await asyncio.sleep(crawl_interval * 6000)
 
 
 @app.on_event("startup")

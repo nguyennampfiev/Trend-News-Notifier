@@ -23,7 +23,9 @@ class BaseMCPHandler(abc.ABC):
         """
         Connect to the MCP server.
         """
-        self.server = MCPServerStdio(params=self.params, name=self.name)
+        self.server = MCPServerStdio(
+            params=self.params, name=self.name, client_session_timeout_seconds=10
+        )
         await self.server.connect()
         self.connected = True
         # logger.info(f"Connected to MCP server: {self.name}")

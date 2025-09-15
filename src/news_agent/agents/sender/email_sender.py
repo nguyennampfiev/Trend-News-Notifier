@@ -60,31 +60,29 @@ class EmailSenderAgent(AbstractSender):
         logger.info(f"Unsent trends: {unsent}")
         sent_count = 0
         failed_count = 0
+        trend = unsent[-1] if unsent else None
+        # for trend in unsent[-1]:
+        logger.info(f"Processing trend: {trend['topic']}")
+        trend_sent_successfully = False
 
-        for trend in unsent[-1]:
-            logger.info(f"Processing trend: {trend['topic']}")
-            trend_sent_successfully = False
-
-            for recipient in self.recipients:
-                logger.info(f"Sending to {recipient}")
-                try:
-                    if await self.send(recipient, trend):
-                        sent_count += 1
-                        trend_sent_successfully = True
-                    else:
-                        failed_count += 1
-                except Exception as e:
-                    logger.error(f"Error sending to {recipient}: {e}")
+        for recipient in self.recipients:
+            logger.info(f"Sending to {recipient}")
+            try:
+                if await self.send(recipient, trend):
+                    sent_count += 1
+                    trend_sent_successfully = True
+                else:
                     failed_count += 1
+            except Exception as e:
+                logger.error(f"Error sending to {recipient}: {e}")
+                failed_count += 1
 
-            # Only mark as sent if at least one recipient got it successfully
-            if trend_sent_successfully:
-                self.db.mark_as_sent(trend["id"])
-                logger.info(f"✅ Trend {trend['id']} marked as sent")
-            else:
-                logger.warning(
-                    f"❌ Failed to send trend {trend['id']} to any recipient"
-                )
+        # Only mark as sent if at least one recipient got it successfully
+        if trend_sent_successfully:
+            self.db.mark_as_sent(trend["id"])
+            logger.info(f"✅ Trend {trend['id']} marked as sent")
+        else:
+            logger.warning(f"❌ Failed to send trend {trend['id']} to any recipient")
 
         return {
             "sent_count": sent_count,

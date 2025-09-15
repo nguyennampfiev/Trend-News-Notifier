@@ -10,7 +10,7 @@ from agents import SQLiteSession
 from dotenv import load_dotenv
 
 from news_agent.agents.db.db import AbstractTrendDB
-from news_agent.agents.db.sql_db import SQLiteTrendDB
+from news_agent.agents.db.trend import SQLiteTrendDB
 from news_agent.agents.ingestion.ingestion import IngestionAgent
 from news_agent.agents.sender.abstract import AbstractSender
 from news_agent.agents.sender.email_sender import EmailSenderAgent
@@ -151,3 +151,71 @@ class PlannerAgent:
             "ingestion": results,
             "sent_status": sender_result,
         }
+
+    async def process_query_by_user(self, query: str, user: str) -> Dict[str, Any]:
+        """Orchestrate ingestion → save → sender workflow."""
+        if not self.ingestion_agent or not self.sender_agent:
+            raise RuntimeError("Agents not initialized. Call load_config() first.")
+
+        # Call IngestionAgent with retry logic based on config
+        retries = 0
+        while retries < self.max_ingestion_retries:
+            try:
+                ingestion_result = await self.ingestion_agent.process_query(query)
+                break
+            except Exception as e:
+                logger.error(f"IngestionAgent failed (attempt {retries+1}): {e}")
+                await asyncio.sleep(self.process_retry_delay)
+                retries += 1
+        else:
+            logger.error("Max ingestion retries reached. Delaying before next attempt.")
+            await asyncio.sleep(self.ingestion_failure_delay * 60)
+            return {"results": "No results found due to repeated ingestion failures."}
+
+        results = ingestion_result.get("results")
+        if not results or results == "No results found.":
+            logger.info("No results returned from ingestion. Pipeline stopped.")
+            results = []
+
+        if results:
+            # Save to DB
+            try:
+                for news_item in results.news:
+                    if news_item is None:
+                        continue  # skip empty
+
+                    topic = getattr(news_item, "topic", "").strip()
+                    summary = getattr(news_item, "summary", "").strip()
+                    link = getattr(news_item, "link", "").strip()
+                    check_duplicate = await self.deduplication_agent.is_duplicate(
+                        topic, summary, link
+                    )
+
+                    if check_duplicate:  # Skip duplicates
+                        logger.info(
+                            f"Duplicate found, skipping: topic='{topic}', link='{link}'"
+                        )
+                        continue
+                    else:
+                        logger.info(f"Saving trend: topic='{topic}', link='{link}'")
+                        self.db.save_trend(
+                            topic=topic,
+                            summary=summary,
+                            url=link,
+                            source="IngestionAgent",
+                        )
+                        trend = {}
+                        trend["topic"] = topic
+                        trend["link"] = link
+                        trend["summary"] = summary
+                        try:
+                            print(f"Sending news to {user}")
+                            await self.sender_agent.send(to_address=user, trend=trend)
+                            logger.info("SenderAgent completed sending trends to user ")
+                        except Exception as e:
+                            logger.error(f"SenderAgent failed: {e}")
+                            return {"error": "Failed to send trends."}
+
+            except Exception as e:
+                logger.error(f"Error saving to DB: {e}")
+                return {"error": "Failed to save trend to database."}

@@ -28,15 +28,16 @@ class SQLiteTrendDB(AbstractTrendDB):
         self.conn.commit()
 
     def save_trend(self, topic: str, summary: str, url: str, source: str):
-        with self.conn:
-            self.conn.execute(
-                """
-                INSERT INTO trends (topic, summary, url, source, notified)
-                VALUES (?, ?, ?, ?, 0)
+        # with self.conn:
+        cursor = self.conn.execute(
+            """
+                INSERT INTO trends (topic, summary, url, source)
+                VALUES (?, ?, ?, ?)
             """,
-                (topic, summary, url, source),
-            )
+            (topic, summary, url, source),
+        )
         self.conn.commit()
+        return cursor.lastrowid
 
     def get_unsent_trends(self) -> List[Dict]:
         cursor = self.conn.cursor()

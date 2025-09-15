@@ -19,7 +19,7 @@ class DeduplicationAgent:
         entries in the database based on the topic and URL.
         Return True if it is a duplicate, otherwise return False.
         """
-        self.session_id = SQLiteSession("123")
+        # self.session_id = SQLiteSession("123")
         self.promt = DEFAULT_PROMPT
         self.agent = init_agent(
             self.promt,
@@ -32,7 +32,7 @@ class DeduplicationAgent:
         # Load existing entries from the database
         existing_entries = self.db.get_all_entries()
         query = f"Is the following news item a duplicate of any existing entries? Topic: {topic}, Summary: {summary}, Link: {link}. Existing entries: {existing_entries}"
-        result = await Runner.run(self.agent, query, session=self.session_id)
+        result = await Runner.run(self.agent, query)
         # Using as exisiting_entries to
         try:
             if result.final_output.exists:

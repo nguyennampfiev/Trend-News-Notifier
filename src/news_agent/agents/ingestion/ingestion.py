@@ -73,22 +73,18 @@ class IngestionAgent:
     async def _ensure_connected(self) -> None:
         if self._ingestion is None:
             self._ingestion = await AbstractIngestion.from_config(self.config_path)
+            logger.info("Conected to ingestion MCP servers.")
+            mcp_servers = self._ingestion.get_mcp_servers()
+            self.agent = init_agent(
+                self.prompt, mcp_servers, name="IngestionAgent", output_type=NewsOutput
+            )
 
     async def process_query(self, query: str) -> Dict[str, Any]:
         await self._ensure_connected()
-        mcp_servers = self._ingestion.get_mcp_servers()
-        logger.info(f"Connected MCP servers: {[server.name for server in mcp_servers]}")
-        # print mcp tool names
-        # for server in mcp_servers:
-        #    tools = await server.list_tools()
-        #    logger.info(f"MCP server '{server.name}' has tools: {tools}")
-        # agent = init_agent(self.prompt, mcp_servers, name="IngestionAgent", output_guardrails=[check_ouputformat_with_guardrail], output_type=MessageOutput)
-        # agent
-        # result = await Runner.run(agent, query, session=self.session_id)
-        agent = init_agent(
-            self.prompt, mcp_servers, name="IngestionAgent", output_type=NewsOutput
-        )
-        result = await Runner.run(agent, query, session=self.session_id)
+        if not self.agent:
+            raise RuntimeError("Agent not initialized.")
+
+        result = await Runner.run(self.agent, query, session=self.session_id)
         logger.info(f"IngestionAgent output: {result.final_output}")
         if result.final_output:
             print(result.final_output)
