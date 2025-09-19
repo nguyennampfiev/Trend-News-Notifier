@@ -79,10 +79,19 @@ class IngestionAgent:
                 self.prompt, mcp_servers, name="IngestionAgent", output_type=NewsOutput
             )
 
-    async def process_query(self, query: str) -> Dict[str, Any]:
+    async def get_agent(self):
+        """Get the initialized agent for handoff."""
         await self._ensure_connected()
-        if not self.agent:
-            raise RuntimeError("Agent not initialized.")
+        return self.agent
+
+    async def process_query(self, query: str) -> Dict[str, Any]:
+        """
+        DOing ingestion with query
+        """
+        logger.info("Doing ingestion with query: ", query)
+        # await self._ensure_connected()
+        # if not self.agent:
+        #    raise RuntimeError("Agent not initialized.")
 
         result = await Runner.run(self.agent, query, session=self.session_id)
         logger.info(f"IngestionAgent output: {result.final_output}")
