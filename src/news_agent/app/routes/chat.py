@@ -9,7 +9,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/")
+@router.post("")
 async def ask(req: AskRequest):
     """
     If chat agent is not ready, return 503 with friendly message.

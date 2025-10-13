@@ -1,4 +1,4 @@
-import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, List
 
@@ -14,7 +14,10 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, selectinload, sessionmaker
+
+logger = logging.getLogger("subscription_db")
+logging.basicConfig(level=logging.INFO)
 
 # =====================================================
 # CONFIGURATION
@@ -130,23 +133,75 @@ async def init_db():
 class SQLAlchemySubscriptionDB:
     """Async DB layer for subscriptions, tags, and trends."""
 
-    def __init__(self):
-        asyncio.create_task(init_db())  # initialize schema at startup
+    # def __init__(self):
+    #    asyncio.create_task(init_db())  # initialize schema at startup
+
+    async def init_db(self):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all, checkfirst=True)
 
     # -----------------------
     # Subscription methods
     # -----------------------
-    async def add_subscription(self, subscription: Subscription):
+    async def add_subscription(
+        self, email: str, topics: list[str], notes: str | None = None
+    ):
         async with get_db() as db:
-            db.add(subscription)
-            await db.commit()
-            await db.refresh(subscription)
-            return subscription
+            logger.info(
+                "💾 add_subscription called with email=%s, topics=%s, notes=%s",
+                email,
+                topics,
+                notes,
+            )
 
-    async def get_subscriptions(self) -> List[Subscription]:
-        async with get_db() as db:
-            result = await db.execute(select(Subscription))
-            return result.scalars().all()
+            # Fetch subscription + eager-load tags
+            result = await db.execute(
+                select(Subscription)
+                .where(Subscription.email == email)
+                .options(selectinload(Subscription.tags))
+            )
+            subscription = result.scalar_one_or_none()
+
+            if subscription:
+                logger.info("⚠️ Subscription already exists: %s", subscription)
+                if notes:
+                    subscription.notes = notes
+            else:
+                subscription = Subscription(email=email, notes=notes)
+                db.add(subscription)
+                await db.flush()
+                logger.info("➕ Added new subscription object: %s", subscription)
+                await db.refresh(subscription, ["tags"])  # <--- ADD THIS LINE
+            # Attach tags safely inside the session
+            for topic in topics:
+                tag_result = await db.execute(select(Tag).where(Tag.name == topic))
+                tag = tag_result.scalar_one_or_none()
+                if not tag:
+                    tag = Tag(name=topic)
+                    db.add(tag)
+                    await db.flush()
+                    logger.info("➕ Added new tag: %s", tag)
+                if tag not in subscription.tags:
+                    subscription.tags.append(tag)
+                    logger.info(
+                        "🔗 Linked tag '%s' to subscription '%s'",
+                        tag.name,
+                        subscription.email,
+                    )
+
+            await db.commit()
+            await db.refresh(subscription, ["tags"])
+            logger.info(
+                "✅ Subscription committed to DB: %s with tags %s",
+                subscription.email,
+                [t.name for t in subscription.tags],
+            )
+
+            return {
+                "id": subscription.id,
+                "email": subscription.email,
+                "tags": [t.name for t in subscription.tags],
+            }
 
     # -----------------------
     # Tag methods
