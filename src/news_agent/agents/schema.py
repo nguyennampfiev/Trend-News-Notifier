@@ -19,3 +19,8 @@ class NewsOutput(BaseModel):
 
 class CheckExistence(BaseModel):
     exists: bool
+
+
+class AskRequest(BaseModel):
+    message: str
+    topics: list[str] = []

@@ -6,10 +6,11 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from agents import SQLiteSession
+from agents import Runner, SQLiteSession
 from dotenv import load_dotenv
 
-from news_agent.agents.db.db import AbstractTrendDB
+from news_agent.agents.base_agent import init_agent
+from news_agent.agents.db.sqlachemy_db import SQLAlchemySubscriptionDB
 from news_agent.agents.db.trend import SQLiteTrendDB
 from news_agent.agents.ingestion.ingestion import IngestionAgent
 from news_agent.agents.sender.abstract import AbstractSender
@@ -47,7 +48,7 @@ class PlannerAgent:
         self,
         config_path: str,
         session_id: SQLiteSession,
-        db: Optional[AbstractTrendDB] = None,
+        db: Optional[SQLAlchemySubscriptionDB] = None,
         prompt: Optional[str] = None,
     ):
         self.config_path = config_path
@@ -56,7 +57,7 @@ class PlannerAgent:
         self.config: Optional[Dict[str, Any]] = None
         self.ingestion_agent: Optional[IngestionAgent] = None
         self.sender_agent: Optional[AbstractSender] = None
-        self.db: AbstractTrendDB = db or SQLiteTrendDB("trends.db")
+        self.db: SQLAlchemySubscriptionDB = db or SQLiteTrendDB("trends.db")
         self.load_config()
 
     def load_config(self):
@@ -81,141 +82,33 @@ class PlannerAgent:
             self.db, smtp_user, smtp_pass, RECIPIENT_EMAILS
         )
         self.deduplication_agent = DeduplicationAgent(self.db, self.session_id)
+        # Create list of handoffs
+        handoffs = [self.ingestion_agent, self.deduplication_agent, self.sender_agent]
+
+        self.planner_agent = init_agent(
+            instructions=self.prompt,
+            mcp_servers=[],
+            name="PlannerAgent",
+            handoffs=handoffs,
+        )
 
     async def process_query(self, query: str) -> Dict[str, Any]:
-        """Orchestrate ingestion → save → sender workflow."""
-        if not self.ingestion_agent or not self.sender_agent:
-            raise RuntimeError("Agents not initialized. Call load_config() first.")
+        results = await Runner.run(self.planner_agent, query)
+        return {"results": results.final_output}
 
-        # Call IngestionAgent with retry logic based on config
-        retries = 0
-        while retries < self.max_ingestion_retries:
+    async def automatic_agent_loop(self, interval_minutes: int = 60):
+        """Background task to run the agent periodically."""
+        while True:
             try:
-                ingestion_result = await self.ingestion_agent.process_query(query)
-                break
+                logger.info("Starting automatic agent run...")
+                topics = await self.db.get_all_topics()
+                if not topics:
+                    logger.info("No topics found in the database. Skipping this run.")
+                else:
+                    for topic in topics:
+                        logger.info(f"Processing topic: {topic}")
+                        await self.process_query(topic)
+                logger.info("Automatic agent run completed.")
             except Exception as e:
-                logger.error(f"IngestionAgent failed (attempt {retries+1}): {e}")
-                await asyncio.sleep(self.process_retry_delay)
-                retries += 1
-        else:
-            logger.error("Max ingestion retries reached. Delaying before next attempt.")
-            await asyncio.sleep(self.ingestion_failure_delay * 60)
-            return {"results": "No results found due to repeated ingestion failures."}
-
-        results = ingestion_result.get("results")
-        if not results or results == "No results found.":
-            logger.info("No results returned from ingestion. Pipeline stopped.")
-            results = []
-
-        if results:
-            # Save to DB
-            try:
-                for news_item in results.news:
-                    if news_item is None:
-                        continue  # skip empty
-
-                    topic = getattr(news_item, "topic", "").strip()
-                    summary = getattr(news_item, "summary", "").strip()
-                    link = getattr(news_item, "link", "").strip()
-                    check_duplicate = await self.deduplication_agent.is_duplicate(
-                        topic, summary, link
-                    )
-
-                    if check_duplicate:  # Skip duplicates
-                        logger.info(
-                            f"Duplicate found, skipping: topic='{topic}', link='{link}'"
-                        )
-                        continue
-                    else:
-                        logger.info(f"Saving trend: topic='{topic}', link='{link}'")
-                        self.db.save_trend(
-                            topic=topic,
-                            summary=summary,
-                            url=link,
-                            source="IngestionAgent",
-                        )
-            except Exception as e:
-                logger.error(f"Error saving to DB: {e}")
-                return {"error": "Failed to save trend to database."}
-
-        # Call SenderAgent to send unsent items
-        try:
-            sender_result = await self.sender_agent.send_unsent()
-            logger.info("SenderAgent completed sending unsent trends.")
-        except Exception as e:
-            logger.error(f"SenderAgent failed: {e}")
-            return {"error": "Failed to send trends."}
-
-        return {
-            "results": f"Pipeline completed for query: {query}",
-            "ingestion": results,
-            "sent_status": sender_result,
-        }
-
-    async def process_query_by_user(self, query: str, user: str) -> Dict[str, Any]:
-        """Orchestrate ingestion → save → sender workflow."""
-        if not self.ingestion_agent or not self.sender_agent:
-            raise RuntimeError("Agents not initialized. Call load_config() first.")
-
-        # Call IngestionAgent with retry logic based on config
-        retries = 0
-        while retries < self.max_ingestion_retries:
-            try:
-                ingestion_result = await self.ingestion_agent.process_query(query)
-                break
-            except Exception as e:
-                logger.error(f"IngestionAgent failed (attempt {retries+1}): {e}")
-                await asyncio.sleep(self.process_retry_delay)
-                retries += 1
-        else:
-            logger.error("Max ingestion retries reached. Delaying before next attempt.")
-            await asyncio.sleep(self.ingestion_failure_delay * 60)
-            return {"results": "No results found due to repeated ingestion failures."}
-
-        results = ingestion_result.get("results")
-        if not results or results == "No results found.":
-            logger.info("No results returned from ingestion. Pipeline stopped.")
-            results = []
-
-        if results:
-            # Save to DB
-            try:
-                for news_item in results.news:
-                    if news_item is None:
-                        continue  # skip empty
-
-                    topic = getattr(news_item, "topic", "").strip()
-                    summary = getattr(news_item, "summary", "").strip()
-                    link = getattr(news_item, "link", "").strip()
-                    check_duplicate = await self.deduplication_agent.is_duplicate(
-                        topic, summary, link
-                    )
-
-                    if check_duplicate:  # Skip duplicates
-                        logger.info(
-                            f"Duplicate found, skipping: topic='{topic}', link='{link}'"
-                        )
-                        continue
-                    else:
-                        logger.info(f"Saving trend: topic='{topic}', link='{link}'")
-                        self.db.save_trend(
-                            topic=topic,
-                            summary=summary,
-                            url=link,
-                            source="IngestionAgent",
-                        )
-                        trend = {}
-                        trend["topic"] = topic
-                        trend["link"] = link
-                        trend["summary"] = summary
-                        try:
-                            print(f"Sending news to {user}")
-                            await self.sender_agent.send(to_address=user, trend=trend)
-                            logger.info("SenderAgent completed sending trends to user ")
-                        except Exception as e:
-                            logger.error(f"SenderAgent failed: {e}")
-                            return {"error": "Failed to send trends."}
-
-            except Exception as e:
-                logger.error(f"Error saving to DB: {e}")
-                return {"error": "Failed to save trend to database."}
+                logger.error(f"Error during automatic agent run: {e}")
+            await asyncio.sleep(interval_minutes * 60)
