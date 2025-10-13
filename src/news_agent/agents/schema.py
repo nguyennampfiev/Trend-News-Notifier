@@ -24,3 +24,7 @@ class CheckExistence(BaseModel):
 class AskRequest(BaseModel):
     message: str
     topics: list[str] = []
+
+
+class ChatOutput(BaseModel):
+    response: str
