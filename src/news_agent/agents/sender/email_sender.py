@@ -1,10 +1,16 @@
 import logging
 from email.message import EmailMessage
-from typing import Dict, List
+from typing import Dict
 
 import aiosmtplib
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
-from news_agent.agents.db.sqlachemy_db import SQLAlchemySubscriptionDB
+from news_agent.agents.db.sqlachemy_db import (
+    SQLAlchemySubscriptionDB,
+    Subscription,
+    get_db,
+)
 from news_agent.agents.sender.abstract import AbstractSender
 
 logger = logging.getLogger(__name__)
@@ -17,13 +23,10 @@ class EmailSenderAgent(AbstractSender):
         db: SQLAlchemySubscriptionDB,
         smtp_user: str,
         smtp_pass: str,
-        recipients: List[str],
     ):
         self.db = db
         self.smtp_user = smtp_user
         self.smtp_pass = smtp_pass
-        # Clean recipients
-        self.recipients = recipients
         self.configure()
 
     def configure(self, settings: dict | None = None) -> None:
@@ -50,7 +53,7 @@ class EmailSenderAgent(AbstractSender):
                 start_tls=True,
                 username=self.smtp_config["username"],
                 password=self.smtp_config["password"],
-                timeout=30,  # Add timeout
+                timeout=30,
             )
             logger.info(f"✅ Email sent to {to_address}")
             return True
@@ -58,38 +61,48 @@ class EmailSenderAgent(AbstractSender):
             logger.error(f"❌ Failed to send email to {to_address}: {e}")
             return False
 
-    async def send_unsent(self) -> dict:
-        """Fetch unsent trends from DB and send them via email."""
-        unsent = self.db.get_unsent_trends()
-        logger.info(f"Unsent trends: {unsent}")
+    async def send_for_subscriptions(self) -> dict:
+        """Send trends to all subscribers based on their tags."""
         sent_count = 0
         failed_count = 0
-        trend = unsent[-1] if unsent else None
-        # for trend in unsent[-1]:
-        logger.info(f"Processing trend: {trend['topic']}")
-        trend_sent_successfully = False
 
-        for recipient in self.recipients:
-            logger.info(f"Sending to {recipient}")
-            try:
-                if await self.send(recipient, trend):
-                    sent_count += 1
-                    trend_sent_successfully = True
-                else:
-                    failed_count += 1
-            except Exception as e:
-                logger.error(f"Error sending to {recipient}: {e}")
-                failed_count += 1
+        async with get_db() as db:
+            # Load all subscriptions from the database
+            result = await db.execute(
+                select(Subscription).options(selectinload(Subscription.tags))
+            )
+            subscriptions = result.scalars().all()
 
-        # Only mark as sent if at least one recipient got it successfully
-        if trend_sent_successfully:
-            self.db.mark_as_sent(trend["id"])
-            logger.info(f"✅ Trend {trend['id']} marked as sent")
-        else:
-            logger.warning(f"❌ Failed to send trend {trend['id']} to any recipient")
+            for subscription in subscriptions:
+                email = subscription.email
+                trends = await self.db.get_trends_for_user(email)
+                if not trends:
+                    logger.info(f"No new trends for {email}")
+                    continue
+
+                for trend in trends:
+                    try:
+                        if await self.send(
+                            email,
+                            {
+                                "topic": trend.topic,
+                                "summary": trend.summary,
+                                "url": trend.url,
+                            },
+                        ):
+                            trend.notified = True
+                            sent_count += 1
+                    except Exception as e:
+                        failed_count += 1
+                        logger.error(
+                            f"Error sending trend '{trend.topic}' to {email}: {e}"
+                        )
+
+            # Commit all changes (mark trends as notified)
+            await db.commit()
 
         return {
             "sent_count": sent_count,
             "failed_count": failed_count,
-            "total_unsent": len(unsent),
+            "total_subscriptions": len(subscriptions),
         }

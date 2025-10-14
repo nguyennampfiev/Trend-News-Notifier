@@ -88,15 +88,15 @@ class IngestionAgent:
         """
         DOing ingestion with query
         """
-        logger.info("Doing ingestion with query: ", query)
+        logger.info(f"Doing ingestion with query: {query} ")
         # await self._ensure_connected()
         # if not self.agent:
         #    raise RuntimeError("Agent not initialized.")
 
-        result = await Runner.run(self.agent, query, session=self.session_id)
+        result = await Runner.run(self.agent, query)
         logger.info(f"IngestionAgent output: {result.final_output}")
         if result.final_output:
-            print(result.final_output)
+            logger.info(f"IngestionAgent result: {result.final_output}")
             return {"results": result.final_output}
         else:
             return {"results": "No results found."}

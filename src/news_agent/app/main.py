@@ -1,16 +1,22 @@
 import asyncio
 import logging
+import os
 
 from agents import SQLiteSession
 from fastapi import FastAPI
 
 from news_agent.agents.chat.chat_agent import ChatAgent
-from news_agent.agents.planner.planner import PlannerAgent
+from news_agent.agents.db.sqlachemy_db import SQLAlchemySubscriptionDB
+from news_agent.agents.ingestion.ingestion import IngestionAgent
+from news_agent.agents.planner.planner import Planner
+from news_agent.agents.sender.email_sender import EmailSenderAgent
+from news_agent.agents.validator.deduplication_agent import DeduplicationAgent
 from news_agent.app import state
 from news_agent.app.routes import chat, subscriptions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 app = FastAPI(title="News Agent Notifier")
 
@@ -38,33 +44,41 @@ async def init_chat_agent_background(config_path: str, session_id: SQLiteSession
 async def startup_event():
     logger.info("Starting application initialization...")
 
-    # Initialize DB tables
-    try:
-        await state.DB.init_db()
-        logger.info("Database initialized successfully.")
-    except Exception as e:
-        logger.exception("Failed to initialize database: %s", e)
+    # Initialize DB
+    state.DB = SQLAlchemySubscriptionDB()
+    await state.DB.init_db()
+    logger.info("Database initialized successfully.")
 
-    # Initialize ChatAgent in background
-    try:
-        await init_chat_agent_background(
-            config_path="src/news_agent/config/planner_config.json",
-            session_id=SQLiteSession(session_id="user123"),
-        )
-        logger.info("✅ ChatAgent initialized successfully before PlannerAgent.")
-    except Exception as e:
-        logger.exception("❌ Failed to initialize ChatAgent: %s", e)
-        return  # stop startup if critical
+    # Initialize session
+    session_id = SQLiteSession(session_id="user123")
 
-    # Initialize PlannerAgent
-    try:
-        state.planner_agent = PlannerAgent(
-            "src/news_agent/config/planner_config.json",
-            SQLiteSession(session_id="user123"),
-            db=state.DB,
-        )
-        loop = asyncio.get_event_loop()
-        loop.create_task(state.planner_agent.automatic_agent_loop())
-        logger.info("PlannerAgent background loop started.")
-    except Exception as e:
-        logger.exception("Failed to initialize PlannerAgent: %s", e)
+    await init_chat_agent_background(
+        config_path="src/news_agent/config/planner_config.json", session_id=session_id
+    )
+    # Initialize agents once
+    state.ingestion_agent = IngestionAgent(
+        "src/news_agent/config/ingest_mcp_config.json", session_id
+    )
+    await state.ingestion_agent._ensure_connected()
+    logger.info("IngestionAgent initialized.")
+
+    state.sender_agent = EmailSenderAgent(
+        state.DB, os.getenv("SMTP_USER"), os.getenv("SMTP_PASS")
+    )
+    logger.info("SenderAgent initialized.")
+
+    state.deduplication_agent = DeduplicationAgent(state.DB, session_id)
+    logger.info("DeduplicationAgent initialized.")
+
+    # Initialize Planner with already created agents
+    state.planner = Planner(
+        config_path="src/news_agent/config/planner_config.json",
+        session_id=session_id,
+        db=state.DB,
+        ingestion_agent=state.ingestion_agent,
+        sender_agent=state.sender_agent,
+        deduplication_agent=state.deduplication_agent,
+    )
+    # Start background loop
+    asyncio.create_task(state.planner.automatic_agent_loop())
+    logger.info("PlannerAgent background loop started.")

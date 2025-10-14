@@ -68,7 +68,7 @@ Modes of operation:
         self.prompt = prompt or self.DEFAULT_PROMPT
 
         self.config: Optional[Dict[str, Any]] = None
-        self.ingestion_agent: Optional[Agent] = None
+        self.ingestion_agent: Optional[IngestionAgent] = None
         self.chat_agent: Optional[Agent] = None
 
     # -------------------------------------------------------------------------

@@ -1,14 +1,16 @@
-# news_agent/app/state.py
 import asyncio
-from typing import Optional
 
-from news_agent.agents.chat.chat_agent import ChatAgent
 from news_agent.agents.db.sqlachemy_db import SQLAlchemySubscriptionDB
-from news_agent.agents.planner.planner import PlannerAgent
+from news_agent.agents.ingestion.ingestion import IngestionAgent
+from news_agent.agents.planner.planner import Planner
+from news_agent.agents.sender.email_sender import EmailSenderAgent
+from news_agent.agents.validator.deduplication_agent import DeduplicationAgent
 
-DB = SQLAlchemySubscriptionDB()
-chat_agent: Optional[ChatAgent] = None
-planner_agent: Optional[PlannerAgent] = None
+DB: SQLAlchemySubscriptionDB | None = None
+ingestion_agent: IngestionAgent | None = None
+sender_agent: EmailSenderAgent | None = None
+deduplication_agent: DeduplicationAgent | None = None
+planner: Planner | None = None
 
 # Event used to signal chat agent readiness
 chat_ready_event: asyncio.Event = asyncio.Event()

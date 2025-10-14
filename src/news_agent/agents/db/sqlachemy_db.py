@@ -116,25 +116,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 # =====================================================
-# INITIALIZATION
-# =====================================================
-
-
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all, checkfirst=True)
-
-
-# =====================================================
 # DATABASE CLASS
 # =====================================================
 
 
 class SQLAlchemySubscriptionDB:
     """Async DB layer for subscriptions, tags, and trends."""
-
-    # def __init__(self):
-    #    asyncio.create_task(init_db())  # initialize schema at startup
 
     async def init_db(self):
         async with engine.begin() as conn:
@@ -148,13 +135,9 @@ class SQLAlchemySubscriptionDB:
     ):
         async with get_db() as db:
             logger.info(
-                "💾 add_subscription called with email=%s, topics=%s, notes=%s",
-                email,
-                topics,
-                notes,
+                "💾 add_subscription called with email=%s, topics=%s", email, topics
             )
 
-            # Fetch subscription + eager-load tags
             result = await db.execute(
                 select(Subscription)
                 .where(Subscription.email == email)
@@ -163,16 +146,14 @@ class SQLAlchemySubscriptionDB:
             subscription = result.scalar_one_or_none()
 
             if subscription:
-                logger.info("⚠️ Subscription already exists: %s", subscription)
                 if notes:
                     subscription.notes = notes
             else:
                 subscription = Subscription(email=email, notes=notes)
                 db.add(subscription)
                 await db.flush()
-                logger.info("➕ Added new subscription object: %s", subscription)
-                await db.refresh(subscription, ["tags"])  # <--- ADD THIS LINE
-            # Attach tags safely inside the session
+                await db.refresh(subscription, ["tags"])
+
             for topic in topics:
                 tag_result = await db.execute(select(Tag).where(Tag.name == topic))
                 tag = tag_result.scalar_one_or_none()
@@ -180,23 +161,11 @@ class SQLAlchemySubscriptionDB:
                     tag = Tag(name=topic)
                     db.add(tag)
                     await db.flush()
-                    logger.info("➕ Added new tag: %s", tag)
                 if tag not in subscription.tags:
                     subscription.tags.append(tag)
-                    logger.info(
-                        "🔗 Linked tag '%s' to subscription '%s'",
-                        tag.name,
-                        subscription.email,
-                    )
 
             await db.commit()
             await db.refresh(subscription, ["tags"])
-            logger.info(
-                "✅ Subscription committed to DB: %s with tags %s",
-                subscription.email,
-                [t.name for t in subscription.tags],
-            )
-
             return {
                 "id": subscription.id,
                 "email": subscription.email,
@@ -216,12 +185,24 @@ class SQLAlchemySubscriptionDB:
     # -----------------------
     # Trend methods
     # -----------------------
-    async def add_trend(self, trend: Trend):
+    async def add_trend(self, topic: str, summary: str, url: str, tag: str):
         async with get_db() as db:
+            trend = Trend(topic=topic, summary=summary, url=url, notified=False)
             db.add(trend)
+            await db.flush()
+
+            results = await db.execute(select(Tag).where(Tag.name == tag))
+            tag_obj = results.scalar_one_or_none()
+            if not tag_obj:
+                tag_obj = Tag(name=tag)
+                db.add(tag_obj)
+                await db.flush()
+
+            if tag_obj not in trend.tags:
+                trend.tags.append(tag_obj)
+
             await db.commit()
-            await db.refresh(trend)
-            return trend
+            logger.info(f"✅ Trend saved with tags: {tag}")
 
     async def get_all_topics(self, limit: int = 10) -> List[str]:
         async with get_db() as db:
@@ -230,14 +211,52 @@ class SQLAlchemySubscriptionDB:
             )
             return [row[0] for row in result.all()]
 
-    async def select_trend_by_topic_or_link(self, topic: str, link: str):
+    # ✅ FIX: no async context here — this just builds a query for reuse
+    def select_trend_by_topic_or_link(self, topic: str, link: str):
+        return (
+            select(Trend)
+            .where(
+                (func.lower(Trend.topic) == func.lower(topic))
+                | (func.lower(Trend.url) == func.lower(link))
+            )
+            .limit(1)
+        )
+
+    # ✅ FIXED: single async context — this is now safe
+    async def db_exists(self, topic: str, link: str) -> bool:
+        async with get_db() as db:
+            try:
+                result = await db.execute(
+                    self.select_trend_by_topic_or_link(topic, link)
+                )
+                exists = result.scalar_one_or_none() is not None
+                return exists
+            except Exception as e:
+                logger.error(f"Database existence check failed: {e}")
+                return False
+
+    async def get_trends_for_user(self, email: str) -> list[Trend]:
         async with get_db() as db:
             result = await db.execute(
-                select(Trend)
-                .where(
-                    (func.lower(Trend.topic) == func.lower(topic))
-                    | (func.lower(Trend.url) == func.lower(link))
-                )
-                .limit(1)
+                select(Subscription)
+                .where(Subscription.email == email)
+                .options(selectinload(Subscription.tags))
             )
-            return result.scalars().first()
+            subscription = result.scalar_one_or_none()
+            if not subscription:
+                return []
+
+            tag_ids = [t.id for t in subscription.tags]
+            if not tag_ids:
+                logger.info(f"User {email} has no tags — skipping.")
+                return []
+
+            trend_result = await db.execute(
+                select(Trend)
+                .join(Trend.tags)
+                .where(Tag.id.in_(tag_ids))
+                .where(Trend.notified.is_(False))
+                .options(selectinload(Trend.tags))
+            )
+            trends = trend_result.scalars().unique().all()
+            return trends

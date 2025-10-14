@@ -2,10 +2,9 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
+from news_agent.agents.schema import SubscribeRequest, UnsubscribeRequest
 from news_agent.app import state
-from news_agent.app.schemas import SubscribeRequest, UnsubscribeRequest
 
-DB = state.DB
 router = APIRouter()
 
 # Configure logger
@@ -14,18 +13,17 @@ logger.setLevel(logging.INFO)
 
 
 @router.post("")
-async def subscribe(req: SubscribeRequest, request: Request):
-    logger.info(
-        f"Incoming subscription request from {request.client.host}: {req.json()}"
-    )
+async def subscribe(req: SubscribeRequest):
+    if state.DB is None:
+        raise HTTPException(status_code=503, detail="Database not initialized yet")
+
     try:
-        subscription_data = await DB.add_subscription(req.email, req.topics, req.notes)
-        return {
-            "message": "Subscription added successfully",
-            **subscription_data,  # now safe: only primitive types
-        }
+        subscription_data = await state.DB.add_subscription(
+            req.email, req.topics, req.notes
+        )
+        return subscription_data
     except Exception as e:
-        logger.exception("Failed to add subscription: %s", e)
+        logger.error(f"Failed to add subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -35,7 +33,7 @@ async def unsubscribe(req: UnsubscribeRequest, request: Request):
         f"Incoming unsubscribe request from {request.client.host}: {req.json()}"
     )
     try:
-        result = await DB.remove_subscription(req.email)
+        result = await state.DB.remove_subscription(req.email)
         logger.info(f"Unsubscribed successfully: {req.email}")
         return {"message": "Unsubscribed successfully", "details": result}
     except Exception as e:
@@ -47,7 +45,7 @@ async def unsubscribe(req: UnsubscribeRequest, request: Request):
 async def list_subscriptions(request: Request):
     logger.info(f"Listing subscriptions requested from {request.client.host}")
     try:
-        subs = await DB.list_subscriptions()
+        subs = await state.DB.list_subscriptions()
         logger.info(f"Retrieved {len(subs)} subscriptions")
         return {"subscriptions": subs}
     except Exception as e:
