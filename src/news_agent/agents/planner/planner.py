@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 
 from news_agent.agents.base_agent import init_agent
 from news_agent.agents.db.sqlachemy_db import SQLAlchemySubscriptionDB
-from news_agent.agents.db.trend import SQLiteTrendDB
 from news_agent.agents.ingestion.ingestion import IngestionAgent
 from news_agent.agents.sender.abstract import AbstractSender
 from news_agent.agents.sender.email_sender import EmailSenderAgent
@@ -22,6 +21,7 @@ load_dotenv()  # Load environment variables from .env file
 smtp_user = os.getenv("SMTP_USER")
 smtp_pass = os.getenv("SMTP_PASS")
 RECIPIENT_EMAILS = os.getenv("RECIPIENT_EMAIL", "").split(",")
+
 # Suppress DEBUG logs
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,12 +34,12 @@ class PlannerAgent:
 
     Your workflow:
     1. Call IngestionAgent with trending topics or keywords.
-    2. If valid results are returned, save them to the database.
+    2. Call DeduplicationAgent to check if news is exist or not if not save them to the database.
     3. After saving, call SenderAgent to send unsent items to users.
     4. Ensure each item is sent only once (check notified flag in DB).
 
     Important:
-    - Always execute steps in this order: ingestion → database save → sender.
+    - Always execute steps in this order: ingestion → check duplicate → database save → sender.
     - If ingestion returns no results, do not call sender.
     - Keep responses structured in JSON with fields: {"action": ..., "data": ...}.
     """
@@ -57,7 +57,7 @@ class PlannerAgent:
         self.config: Optional[Dict[str, Any]] = None
         self.ingestion_agent: Optional[IngestionAgent] = None
         self.sender_agent: Optional[AbstractSender] = None
-        self.db: SQLAlchemySubscriptionDB = db or SQLiteTrendDB("trends.db")
+        self.db: SQLAlchemySubscriptionDB = db or SQLAlchemySubscriptionDB()
         self.load_config()
 
     def load_config(self):
@@ -83,17 +83,21 @@ class PlannerAgent:
         )
         self.deduplication_agent = DeduplicationAgent(self.db, self.session_id)
         # Create list of handoffs
-        handoffs = [self.ingestion_agent, self.deduplication_agent, self.sender_agent]
 
         self.planner_agent = init_agent(
             instructions=self.prompt,
             mcp_servers=[],
             name="PlannerAgent",
-            handoffs=handoffs,
+            handoffs=[
+                self.ingestion_agent,
+                self.deduplication_agent,
+                self.sender_agent,
+            ],
         )
 
     async def process_query(self, query: str) -> Dict[str, Any]:
         results = await Runner.run(self.planner_agent, query)
+        logger.info(f"PlannerAgent process_query results: {results}")
         return {"results": results.final_output}
 
     async def automatic_agent_loop(self, interval_minutes: int = 60):

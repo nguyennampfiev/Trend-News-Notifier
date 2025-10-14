@@ -46,12 +46,15 @@ async def startup_event():
         logger.exception("Failed to initialize database: %s", e)
 
     # Initialize ChatAgent in background
-    asyncio.create_task(
-        init_chat_agent_background(
+    try:
+        await init_chat_agent_background(
             config_path="src/news_agent/config/planner_config.json",
             session_id=SQLiteSession(session_id="user123"),
         )
-    )
+        logger.info("✅ ChatAgent initialized successfully before PlannerAgent.")
+    except Exception as e:
+        logger.exception("❌ Failed to initialize ChatAgent: %s", e)
+        return  # stop startup if critical
 
     # Initialize PlannerAgent
     try:

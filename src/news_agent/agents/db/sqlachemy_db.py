@@ -226,7 +226,7 @@ class SQLAlchemySubscriptionDB:
     async def get_all_topics(self, limit: int = 10) -> List[str]:
         async with get_db() as db:
             result = await db.execute(
-                select(Trend.topic).order_by(Trend.id.desc()).limit(limit)
+                select(Tag.name).order_by(Tag.id.desc()).limit(limit)
             )
             return [row[0] for row in result.all()]
 

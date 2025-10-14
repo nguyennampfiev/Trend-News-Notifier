@@ -4,7 +4,7 @@ from typing import Dict, List
 
 import aiosmtplib
 
-from news_agent.agents.db.db import AbstractTrendDB
+from news_agent.agents.db.sqlachemy_db import SQLAlchemySubscriptionDB
 from news_agent.agents.sender.abstract import AbstractSender
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,11 @@ logging.basicConfig(level=logging.INFO)
 
 class EmailSenderAgent(AbstractSender):
     def __init__(
-        self, db: AbstractTrendDB, smtp_user: str, smtp_pass: str, recipients: List[str]
+        self,
+        db: SQLAlchemySubscriptionDB,
+        smtp_user: str,
+        smtp_pass: str,
+        recipients: List[str],
     ):
         self.db = db
         self.smtp_user = smtp_user
