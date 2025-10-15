@@ -9,7 +9,9 @@ from sqlalchemy.orm import selectinload
 from news_agent.agents.db.sqlachemy_db import (
     SQLAlchemySubscriptionDB,
     Subscription,
+    Trend,
     get_db,
+    trend_tags,
 )
 from news_agent.agents.sender.abstract import AbstractSender
 
@@ -38,12 +40,33 @@ class EmailSenderAgent(AbstractSender):
             "from_address": self.smtp_user,
         }
 
-    async def send(self, to_address: str, trend: Dict) -> bool:
+    async def send(self, to_address: str, data: Dict) -> bool:
+        """Send an email with one or more trends."""
+        trends = data.get("trends", [])
+
+        if not trends:
+            logger.warning(f"No trends to send to {to_address}")
+            return False
+
         message = EmailMessage()
         message["From"] = self.smtp_config["from_address"]
         message["To"] = to_address
-        message["Subject"] = f"New Trend: {trend['topic']}"
-        message.set_content(f"{trend['summary']}\n\nRead more: {trend['url']}")
+
+        # Subject line shows count of trends
+        if len(trends) == 1:
+            message["Subject"] = f"New Trend: {trends[0]['topic']}"
+        else:
+            message["Subject"] = f"{len(trends)} New Trends for You"
+
+        # Build email body with all trends
+        email_body = []
+        for i, trend in enumerate(trends, 1):
+            email_body.append(f"{i}. {trend['topic']}")
+            email_body.append(f"   {trend['summary']}")
+            email_body.append(f"   Read more: {trend['url']}")
+            email_body.append("")  # Empty line between trends
+
+        message.set_content("\n".join(email_body))
 
         try:
             await aiosmtplib.send(
@@ -55,7 +78,7 @@ class EmailSenderAgent(AbstractSender):
                 password=self.smtp_config["password"],
                 timeout=30,
             )
-            logger.info(f"✅ Email sent to {to_address}")
+            logger.info(f"✅ Email sent to {to_address} with {len(trends)} trend(s)")
             return True
         except Exception as e:
             logger.error(f"❌ Failed to send email to {to_address}: {e}")
@@ -67,39 +90,50 @@ class EmailSenderAgent(AbstractSender):
         failed_count = 0
 
         async with get_db() as db:
-            # Load all subscriptions from the database
+            # Load all subscriptions with tags
             result = await db.execute(
                 select(Subscription).options(selectinload(Subscription.tags))
             )
-            subscriptions = result.scalars().all()
+            subscriptions = result.scalars().all()  # Fixed: removed [-1]
 
             for subscription in subscriptions:
                 email = subscription.email
-                trends = await self.db.get_trends_for_user(email)
+
+                # Get tag IDs for this subscription
+                tag_ids = [tag.id for tag in subscription.tags]
+
+                if not tag_ids:
+                    continue
+
+                # Get all unnotified trends matching subscriber's tags
+                trends_result = await db.execute(
+                    select(Trend)
+                    .join(trend_tags, Trend.id == trend_tags.c.trend_id)
+                    .where(trend_tags.c.tag_id.in_(tag_ids))
+                    .where(Trend.notified.is_(False))
+                    .distinct()  # Avoid duplicates if trend has multiple matching tags
+                )
+                trends = trends_result.scalars().all()
+
                 if not trends:
                     logger.info(f"No new trends for {email}")
                     continue
 
-                for trend in trends:
-                    try:
-                        if await self.send(
-                            email,
-                            {
-                                "topic": trend.topic,
-                                "summary": trend.summary,
-                                "url": trend.url,
-                            },
-                        ):
-                            trend.notified = True
-                            sent_count += 1
-                    except Exception as e:
-                        failed_count += 1
-                        logger.error(
-                            f"Error sending trend '{trend.topic}' to {email}: {e}"
-                        )
-
-            # Commit all changes (mark trends as notified)
-            await db.commit()
+                # Send all trends in one email per subscriber
+                trends_payload = [
+                    {"topic": t.topic, "summary": t.summary, "url": t.url}
+                    for t in trends
+                ]
+                try:
+                    if await self.send(email, {"trends": trends_payload}):
+                        for t in trends:
+                            t.notified = True
+                        sent_count += len(trends)
+                        await db.commit()  # Commit per successful send
+                except Exception as e:
+                    failed_count += len(trends)
+                    logger.error(f"Error sending trends to {email}: {e}")
+                    await db.rollback()  # Rollback on failure
 
         return {
             "sent_count": sent_count,

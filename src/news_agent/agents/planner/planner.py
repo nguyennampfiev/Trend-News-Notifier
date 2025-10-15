@@ -109,6 +109,7 @@ class Planner:
 
         # Send updates to subscribers
         send_results = await self.sender_agent.send_for_subscriptions()
+
         logger.info(f"Email send results: {send_results}")
 
         return {
