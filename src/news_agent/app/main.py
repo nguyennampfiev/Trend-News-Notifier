@@ -26,7 +26,10 @@ app.include_router(chat.router, prefix="/api/chat")
 
 
 async def init_chat_agent_background(
-    config_path: str, session_id: SQLiteSession, max_retries: int = 5
+    config_path: str,
+    session_id: SQLiteSession,
+    ingestion_agent: IngestionAgent,
+    max_retries: int = 5,
 ):
     """
     Initialize ChatAgent with retry + pre-initialized IngestionAgent.
@@ -38,25 +41,12 @@ async def init_chat_agent_background(
 
         for attempt in range(1, max_retries + 1):
             try:
-                # Step 1: ensure ingestion agent is ready first
-                if getattr(state, "ingestion_agent", None) is None:
-                    logger.info(
-                        f"🔄 Initializing IngestionAgent (attempt {attempt})..."
-                    )
-                    state.ingestion_agent = IngestionAgent(
-                        "src/news_agent/config/ingest_mcp_config.json", session_id
-                    )
-                    # Optional: check connection if ingestion supports async init
-                    await state.ingestion_agent._ensure_connected()
-                    logger.info("✅ IngestionAgent ready.")
-
-                # Step 2: initialize ChatAgent with prebuilt ingestion agent
                 logger.info(
                     f"🚀 Initializing ChatAgent (attempt {attempt}/{max_retries})..."
                 )
                 agent = await ChatAgent.create(
                     session_id,
-                    ingestion_agent=state.ingestion_agent,
+                    ingestion_agent=ingestion_agent,
                 )
 
                 state.chat_agent = agent
@@ -86,15 +76,18 @@ async def startup_event():
     # Initialize session
     session_id = SQLiteSession(session_id="user123")
 
-    await init_chat_agent_background(
-        config_path="src/news_agent/config/planner_config.json", session_id=session_id
-    )
     # Initialize agents once
-    # state.ingestion_agent = IngestionAgent(
-    #     "src/news_agent/config/ingest_mcp_config.json", session_id
-    # )
-    # await state.ingestion_agent._ensure_connected()
-    # logger.info("IngestionAgent initialized.")
+    state.ingestion_agent = IngestionAgent(
+        "src/news_agent/config/ingest_mcp_config.json", session_id
+    )
+    await state.ingestion_agent._ensure_connected()
+    logger.info("IngestionAgent initialized.")
+
+    await init_chat_agent_background(
+        config_path="src/news_agent/config/planner_config.json",
+        session_id=session_id,
+        ingestion_agent=state.ingestion_agent,
+    )
 
     state.sender_agent = EmailSenderAgent(
         state.DB, os.getenv("SMTP_USER"), os.getenv("SMTP_PASS")
