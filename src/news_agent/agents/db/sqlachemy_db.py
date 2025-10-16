@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    and_,
     func,
     select,
 )
@@ -82,7 +83,9 @@ class Trend(Base):
     url = Column(String(2048), nullable=True)
     source = Column(String(256), nullable=True)
     notified = Column(Boolean, default=False)
-    tags = relationship("Tag", secondary=trend_tags, back_populates="trends")
+    tags = relationship(
+        "Tag", secondary=trend_tags, back_populates="trends", lazy="selectin"
+    )
 
 
 # =====================================================
@@ -204,9 +207,11 @@ class SQLAlchemySubscriptionDB:
                 db.add(tag_obj)
                 await db.flush()
 
-            if tag_obj not in trend.tags:
-                trend.tags.append(tag_obj)
-
+            # if tag_obj not in trend.tags:
+            # trend.tags.append(tag_obj)
+            await db.execute(
+                trend_tags.insert().values(trend_id=trend.id, tag_id=tag_obj.id)
+            )
             await db.commit()
             logger.info(f"✅ Trend saved with tags: {tag}")
 
@@ -222,8 +227,10 @@ class SQLAlchemySubscriptionDB:
         return (
             select(Trend)
             .where(
-                (func.lower(Trend.topic) == func.lower(topic))
-                | (func.lower(Trend.url) == func.lower(link))
+                and_(
+                    (func.lower(Trend.topic) == func.lower(topic)),
+                    (func.lower(Trend.url) == func.lower(link)),
+                )
             )
             .limit(1)
         )
