@@ -10,7 +10,6 @@ from news_agent.agents.db.sqlachemy_db import (
     SQLAlchemySubscriptionDB,
     Tag,
     Trend,
-    get_db,
     trend_tags,
 )
 from news_agent.agents.ingestion.ingestion import IngestionAgent
@@ -62,7 +61,7 @@ class Planner:
 
         processed_items = []
 
-        async with get_db() as db:  # SINGLE session context
+        async with self.db.get_db() as db:  # SINGLE session context
             for item in results.news:
                 topic = getattr(item, "topic", "").strip()
                 summary = getattr(item, "summary", "").strip()

@@ -86,36 +86,6 @@ class Trend(Base):
 
 
 # =====================================================
-# ENGINE & SESSION
-# =====================================================
-
-engine: AsyncEngine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    future=True,
-)
-
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    expire_on_commit=False,
-    class_=AsyncSession,
-)
-
-# =====================================================
-# ASYNC CONTEXT MANAGER
-# =====================================================
-
-
-@asynccontextmanager
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
-
-
-# =====================================================
 # DATABASE CLASS
 # =====================================================
 
@@ -123,8 +93,44 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 class SQLAlchemySubscriptionDB:
     """Async DB layer for subscriptions, tags, and trends."""
 
+    def __init__(self, engine: AsyncEngine = None, session_maker=None):
+        """
+        Initialize database with optional engine and session maker.
+
+        Args:
+            engine: AsyncEngine instance (creates default if None)
+            session_maker: Session maker factory (creates default if None)
+        """
+        if engine is None:
+            self.engine = create_async_engine(
+                DATABASE_URL,
+                echo=False,
+                future=True,
+            )
+        else:
+            self.engine = engine
+
+        if session_maker is None:
+            self.session_maker = sessionmaker(
+                bind=self.engine,
+                expire_on_commit=False,
+                class_=AsyncSession,
+            )
+        else:
+            self.session_maker = session_maker
+
+    @asynccontextmanager
+    async def get_db(self) -> AsyncGenerator[AsyncSession, None]:
+        """Get database session context manager."""
+        async with self.session_maker() as session:
+            try:
+                yield session
+            finally:
+                await session.close()
+
     async def init_db(self):
-        async with engine.begin() as conn:
+        """Initialize database tables."""
+        async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all, checkfirst=True)
 
     # -----------------------
@@ -133,7 +139,7 @@ class SQLAlchemySubscriptionDB:
     async def add_subscription(
         self, email: str, topics: list[str], notes: str | None = None
     ):
-        async with get_db() as db:
+        async with self.get_db() as db:
             logger.info(
                 "💾 add_subscription called with email=%s, topics=%s", email, topics
             )
@@ -176,7 +182,7 @@ class SQLAlchemySubscriptionDB:
     # Tag methods
     # -----------------------
     async def add_tag(self, tag: Tag):
-        async with get_db() as db:
+        async with self.get_db() as db:
             db.add(tag)
             await db.commit()
             await db.refresh(tag)
@@ -186,7 +192,7 @@ class SQLAlchemySubscriptionDB:
     # Trend methods
     # -----------------------
     async def add_trend(self, topic: str, summary: str, url: str, tag: str):
-        async with get_db() as db:
+        async with self.get_db() as db:
             trend = Trend(topic=topic, summary=summary, url=url, notified=False)
             db.add(trend)
             await db.flush()
@@ -205,14 +211,14 @@ class SQLAlchemySubscriptionDB:
             logger.info(f"✅ Trend saved with tags: {tag}")
 
     async def get_all_topics(self, limit: int = 10) -> List[str]:
-        async with get_db() as db:
+        async with self.get_db() as db:
             result = await db.execute(
                 select(Tag.name).order_by(Tag.id.desc()).limit(limit)
             )
             return [row[0] for row in result.all()]
 
-    # ✅ FIX: no async context here — this just builds a query for reuse
     def select_trend_by_topic_or_link(self, topic: str, link: str):
+        """Build query for finding trends by topic or link (case-insensitive)."""
         return (
             select(Trend)
             .where(
@@ -222,9 +228,9 @@ class SQLAlchemySubscriptionDB:
             .limit(1)
         )
 
-    # ✅ FIXED: single async context — this is now safe
     async def db_exists(self, topic: str, link: str) -> bool:
-        async with get_db() as db:
+        """Check if a trend with given topic or link already exists."""
+        async with self.get_db() as db:
             try:
                 result = await db.execute(
                     self.select_trend_by_topic_or_link(topic, link)
@@ -236,7 +242,8 @@ class SQLAlchemySubscriptionDB:
                 return False
 
     async def get_trends_for_user(self, email: str) -> list[Trend]:
-        async with get_db() as db:
+        """Get unnotified trends matching user's subscribed tags."""
+        async with self.get_db() as db:
             result = await db.execute(
                 select(Subscription)
                 .where(Subscription.email == email)

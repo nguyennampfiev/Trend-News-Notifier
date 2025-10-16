@@ -10,7 +10,6 @@ from news_agent.agents.db.sqlachemy_db import (
     SQLAlchemySubscriptionDB,
     Subscription,
     Trend,
-    get_db,
     trend_tags,
 )
 from news_agent.agents.sender.abstract import AbstractSender
@@ -89,7 +88,7 @@ class EmailSenderAgent(AbstractSender):
         sent_count = 0
         failed_count = 0
 
-        async with get_db() as db:
+        async with self.db.get_db() as db:
             # Load all subscriptions with tags
             result = await db.execute(
                 select(Subscription).options(selectinload(Subscription.tags))
