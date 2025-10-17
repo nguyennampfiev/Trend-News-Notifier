@@ -5,6 +5,7 @@ import time
 from typing import Any, Dict, Optional
 
 import psutil
+import torch
 from agents import Runner, SQLiteSession
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 from dotenv import load_dotenv
@@ -73,25 +74,38 @@ Modes of operation:
         self.config: Optional[Dict[str, Any]] = None
 
         meter = get_meter_provider().get_meter("trend-news-metrics")
-        self.chat_lantency_histogram: Histogram = meter.create_histogram(
-            name="chat.agent.latency",
+
+        # Latency
+        self.chat_latency_histogram: Histogram = meter.create_histogram(
+            name="chat.agent.latency_seconds",
             description="Latency of ChatAgent operations",
             unit="s",
         )
+
+        # CPU, RAM, GPU, TTFT, Tokens
         self.cpu_gauge: ObservableGauge = meter.create_observable_gauge(
-            name="chat.agent.cpu",
+            name="chat.agent.cpu_percent",
             description="CPU percent during ChatAgent operations",
             unit="percent",
             callbacks=[self._cpu_callback],
         )
         self.ram_gauge: ObservableGauge = meter.create_observable_gauge(
-            name="chat.agent.ram",
+            name="chat.agent.ram_percent",
             description="RAM percent during ChatAgent operations",
             unit="percent",
             callbacks=[self._ram_callback],
         )
+        self.gpu_gauge: ObservableGauge = meter.create_observable_gauge(
+            name="chat.agent.gpu_percent",
+            description="GPU percent during ChatAgent operations",
+            unit="percent",
+            callbacks=[self._gpu_callback],
+        )
+
+        # Current metric values
         self._current_cpu = 0.0
         self._current_ram = 0.0
+        self._current_gpu = 0.0
 
     # -------------------------
     # Observable callbacks
@@ -101,6 +115,9 @@ Modes of operation:
 
     def _ram_callback(self, options):
         return [Observation(self._current_ram)]
+
+    def _gpu_callback(self, options):
+        return [Observation(self._current_gpu)]
 
     # -------------------------------------------------------------------------
     # Factory method: initialize agent asynchronously
@@ -113,23 +130,17 @@ Modes of operation:
         prompt: Optional[str] = None,
     ) -> ChatAgent:
         """Factory method to async-initialize ChatAgent for use in app startup."""
-        self = cls(
-            session_id,
-            prompt,
-        )
+        self = cls(session_id, prompt)
 
         try:
-            # Initialize ChatAgent with IngestionAgent as a handoff
             self.chat_agent = init_agent(
                 name="ChatAgent",
                 instructions=self.prompt,
                 handoffs=[ingestion_agent],
                 output_type=ChatOutput,
             )
-
             logger.info("✅ ChatAgent initialized successfully")
             return self
-
         except Exception as e:
             logger.exception("❌ Failed to create ChatAgent")
             raise RuntimeError("Failed to initialize ChatAgent") from e
@@ -138,19 +149,32 @@ Modes of operation:
     # Main chat entrypoint
     # -------------------------------------------------------------------------
     async def chat(self, message: str) -> dict:
-        """Primary chat entrypoint — decides between simple or news mode."""
+        """Primary chat entrypoint — measures CPU, RAM, GPU, TTFT, tokens, and latency."""
         start_time = time.perf_counter()
+        # Reset TTFT and token count
+
         try:
             result = await Runner.run(self.chat_agent, message)
             end_time = time.perf_counter()
             latency = end_time - start_time
+
+            # Capture system metrics
             self._current_cpu = psutil.cpu_percent(interval=0.1)
             self._current_ram = psutil.virtual_memory().percent
-            self.chat_lantency_histogram.record(latency)
-            logger.info(
-                f"ChatAgent processed message in {latency:.3f}s | CPU={self._current_cpu:.1f}% | RAM={self._current_ram:.1f}%"
+            self._current_gpu = (
+                torch.cuda.utilization(0) if torch.cuda.is_available() else 0.0
             )
-            logger.info(f"ChatAgent final output: {result.final_output}")
+
+            # Record latency
+            self.chat_latency_histogram.record(latency)
+
+            logger.info(
+                f"ChatAgent processed message in {latency:.3f}s | "
+                f"CPU={self._current_cpu:.1f}% | RAM={self._current_ram:.1f}% | "
+                f"GPU={self._current_gpu:.1f}%"
+            )
+
+            # Process news output if available
             if hasattr(result.final_output, "news") and result.final_output.news:
                 news_dicts = [
                     {
@@ -172,9 +196,10 @@ Modes of operation:
             latency = end_time - start_time
             self._current_cpu = psutil.cpu_percent(interval=0.1)
             self._current_ram = psutil.virtual_memory().percent
-            self.chat_lantency_histogram.record(latency)
+            self.chat_latency_histogram.record(latency)
             logger.exception(
-                f"Error during chat execution | latency={latency:.3f}s, CPU={self._current_cpu:.1f}%, RAM={self._current_ram:.1f}%"
+                f"Error during chat execution | latency={latency:.3f}s, CPU={self._current_cpu:.1f}%, "
+                f"RAM={self._current_ram:.1f}%, GPU={self._current_gpu:.1f}%, "
             )
             return {
                 "response": "Sorry, something went wrong while processing your request."

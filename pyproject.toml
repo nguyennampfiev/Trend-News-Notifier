@@ -31,6 +31,13 @@ opentelemetry-instrumentation-logging = "^0.59b0"
 opentelemetry-instrumentation-sqlalchemy = "^0.59b0"
 psutil = "^7.1.0"
 opentelemetry-exporter-otlp-proto-http = "^1.38.0"
+torch = {version = "^2.6.0", source = "torch_cu124"}
+nvidia-ml-py3 = "^7.352.0"
+
+[[tool.poetry.source]]
+name = "torch_cu124"
+url = "https://download.pytorch.org/whl/cu124"
+priority = "explicit"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.3.0"
