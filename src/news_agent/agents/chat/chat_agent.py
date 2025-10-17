@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, Optional
 
+import psutil
 from agents import Runner, SQLiteSession
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 from dotenv import load_dotenv
+from opentelemetry.metrics import (
+    Histogram,
+    ObservableGauge,
+    Observation,
+    get_meter_provider,
+)
 
 from news_agent.agents.base_agent import init_agent
 from news_agent.agents.ingestion.ingestion import IngestionAgent
@@ -64,6 +72,36 @@ Modes of operation:
         self.prompt = prompt or self.DEFAULT_PROMPT
         self.config: Optional[Dict[str, Any]] = None
 
+        meter = get_meter_provider().get_meter("trend-news-metrics")
+        self.chat_lantency_histogram: Histogram = meter.create_histogram(
+            name="chat.agent.latency",
+            description="Latency of ChatAgent operations",
+            unit="s",
+        )
+        self.cpu_gauge: ObservableGauge = meter.create_observable_gauge(
+            name="chat.agent.cpu",
+            description="CPU percent during ChatAgent operations",
+            unit="percent",
+            callbacks=[self._cpu_callback],
+        )
+        self.ram_gauge: ObservableGauge = meter.create_observable_gauge(
+            name="chat.agent.ram",
+            description="RAM percent during ChatAgent operations",
+            unit="percent",
+            callbacks=[self._ram_callback],
+        )
+        self._current_cpu = 0.0
+        self._current_ram = 0.0
+
+    # -------------------------
+    # Observable callbacks
+    # -------------------------
+    def _cpu_callback(self, options):
+        return [Observation(self._current_cpu)]
+
+    def _ram_callback(self, options):
+        return [Observation(self._current_ram)]
+
     # -------------------------------------------------------------------------
     # Factory method: initialize agent asynchronously
     # -------------------------------------------------------------------------
@@ -101,8 +139,17 @@ Modes of operation:
     # -------------------------------------------------------------------------
     async def chat(self, message: str) -> dict:
         """Primary chat entrypoint — decides between simple or news mode."""
+        start_time = time.perf_counter()
         try:
             result = await Runner.run(self.chat_agent, message)
+            end_time = time.perf_counter()
+            latency = end_time - start_time
+            self._current_cpu = psutil.cpu_percent(interval=0.1)
+            self._current_ram = psutil.virtual_memory().percent
+            self.chat_lantency_histogram.record(latency)
+            logger.info(
+                f"ChatAgent processed message in {latency:.3f}s | CPU={self._current_cpu:.1f}% | RAM={self._current_ram:.1f}%"
+            )
             logger.info(f"ChatAgent final output: {result.final_output}")
             if hasattr(result.final_output, "news") and result.final_output.news:
                 news_dicts = [
@@ -121,7 +168,14 @@ Modes of operation:
             }
 
         except Exception:
-            logger.exception("Error during chat execution")
+            end_time = time.perf_counter()
+            latency = end_time - start_time
+            self._current_cpu = psutil.cpu_percent(interval=0.1)
+            self._current_ram = psutil.virtual_memory().percent
+            self.chat_lantency_histogram.record(latency)
+            logger.exception(
+                f"Error during chat execution | latency={latency:.3f}s, CPU={self._current_cpu:.1f}%, RAM={self._current_ram:.1f}%"
+            )
             return {
                 "response": "Sorry, something went wrong while processing your request."
             }

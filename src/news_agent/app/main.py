@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 
@@ -13,12 +12,17 @@ from news_agent.agents.sender.email_sender import EmailSenderAgent
 from news_agent.agents.validator.deduplication_agent import DeduplicationAgent
 from news_agent.app import state
 from news_agent.app.routes import chat, subscriptions
+from news_agent.observability.setup_telemetry import init_metrics
+from news_agent.observability.telemtry_middleware import TelemetryMiddleware
+
+init_metrics()  # sets MeterProvider and OTLP exporter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 app = FastAPI(title="News Agent Notifier")
+app.add_middleware(TelemetryMiddleware)
 
 # Routers
 app.include_router(subscriptions.router, prefix="/api/subscribe")
@@ -68,5 +72,5 @@ async def startup_event():
         deduplication_agent=state.deduplication_agent,
     )
     # Start background loop
-    asyncio.create_task(state.planner.automatic_agent_loop())
-    logger.info("PlannerAgent background loop started.")
+    # asyncio.create_task(state.planner.automatic_agent_loop())
+    # logger.info("PlannerAgent background loop started.")
